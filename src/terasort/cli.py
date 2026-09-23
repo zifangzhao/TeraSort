@@ -25,6 +25,8 @@ def main(argv=None):
     sort.add_argument("--backend", choices=("auto", "standard", "deep_tiled", "cublas"),
                       default="auto")
     sort.add_argument("--no-fast-int16", action="store_true")
+    sort.add_argument("--skip-drift-correction", action="store_true",
+                      help="Use Kilosort nblocks=0; skips motion estimation and its detection pass")
     sort.add_argument("--invert-sign", action="store_true")
     sort.add_argument("--no-car", action="store_true")
     sort.add_argument("--verbose", action="store_true")
@@ -47,6 +49,7 @@ def main(argv=None):
                  filename=args.filename, results_dir=args.results_dir,
                  data_dtype=args.data_dtype, backend=args.backend,
                  fast_int16=not args.no_fast_int16,
+                 skip_drift_correction=args.skip_drift_correction,
                  invert_sign=args.invert_sign, do_CAR=not args.no_car,
                  verbose_console=args.verbose)
     return 0

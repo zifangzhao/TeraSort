@@ -57,7 +57,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  progress_bar=None, save_extra_vars=False, clear_cache=False,
                  save_preprocessed_copy=False, bad_channels=None, shank_idx=None,
                  verbose_console=False, verbose_log=False, torch_thread_lim=None,
-                 *, backend="auto", fast_int16=True):
+                 *, backend="auto", fast_int16=True,
+                 skip_drift_correction=False):
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is
@@ -65,10 +66,16 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     always calls unmodified Kilosort. ``deep_tiled`` uses the portable CuPy CUDA
     kernels, while ``cublas`` requires the included Windows x64 native bridge.
     The INT16 reader applies only to a single named read-only INT16 binary.
+    ``skip_drift_correction=True`` sets Kilosort's ``nblocks=0`` for this run
+    without changing the caller's settings dictionary. This skips drift
+    estimation and its extra detection pass; use it only when appropriate for
+    the recording's motion.
     """
     import kilosort
 
-    selected = _select_backend(backend, device, settings or {})
+    run_settings = ({**(settings or {}), "nblocks": 0}
+                    if skip_drift_correction else settings)
+    selected = _select_backend(backend, device, run_settings or {})
     with ExitStack() as stack:
         if selected == "cublas":
             from .kilosort_cublas import cublas_kilosort
@@ -80,7 +87,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             from .kilosort_int16 import native_int16_reader
             stack.enter_context(native_int16_reader(filename))
         return kilosort.run_kilosort(
-            settings, probe=probe, probe_name=probe_name, filename=filename,
+            run_settings, probe=probe, probe_name=probe_name, filename=filename,
             data_dir=data_dir, file_object=file_object, results_dir=results_dir,
             data_dtype=data_dtype, do_CAR=do_CAR, invert_sign=invert_sign,
             device=device, progress_bar=progress_bar,

@@ -56,6 +56,14 @@ reader transfers INT16 to the GPU and converts to calibrated FP32 there;
 sorting arithmetic remains FP32. Pass `fast_int16=False` to use Kilosort's
 reader. Other Kilosort arguments are forwarded unchanged.
 
+Drift correction is enabled by Kilosort's default settings. For a recording
+where you want to skip motion estimation and its extra spike-detection pass,
+set `skip_drift_correction=True` in Python or add `--skip-drift-correction` to
+`terasort sort`. This uses Kilosort's documented `nblocks=0` path for that run.
+The caller's settings dictionary is unchanged. Existing scripts that already
+set `settings["nblocks"] = 0` continue to work. Skipping correction can change
+sorting quality on drifting recordings, so compare outputs before adopting it.
+
 CLI example (the settings file must include `n_chan_bin`):
 
 ```powershell
