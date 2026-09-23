@@ -10,27 +10,53 @@ modified.
 
 ## Install on Windows with an NVIDIA GPU
 
-Use Python 3.11 and run this from the TeraSort directory in PowerShell:
+Use 64-bit Python 3.11, Git, an NVIDIA GPU and compatible driver, and an
+internet connection for Python packages. In PowerShell, clone the repository
+and run its installer:
 
 ```powershell
-py -3.11 -m venv .venv
+git clone https://github.com/zifangzhao/TeraSort.git
+Set-Location TeraSort
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+
+If you already cloned TeraSort, run the last command from that directory and
+skip cloning. The installer creates `.venv` in the repository,
+installs CUDA PyTorch and TeraSort's pinned dependencies, then compiles a small
+CUDA detection kernel and lists the available sorting backends. It uses
+`py -3.11` by default. If
+`py -3.11 --version` cannot find Python 3.11, pass the path to a 64-bit Python
+3.11 executable:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Python 'C:\path\to\python.exe'
+```
+
+Verify an existing installation or inspect the commands without activation:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch, terasort; print(terasort.__version__, torch.cuda.is_available())"
+.\.venv\Scripts\terasort.exe backends
+.\.venv\Scripts\terasort.exe sort --help
+.\.venv\Scripts\terasort.exe lfp --help
+```
+
+The expected CUDA check is `True`; `backends` lists `cublas` on the tested
+Windows x64 setup. For a manual installation, create `.venv` with Python 3.11,
+then run the following from the repository root:
+
+```powershell
+& 'C:\path\to\python.exe' -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 .\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\terasort.exe backends
 ```
 
-Alternatively, `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1`
-runs these commands and checks CUDA. The included cuBLAS bridge is compiled for
-Windows x64 and uses the cuBLAS DLL from the tested PyTorch 2.10 CUDA 12.8
-installation. CuPy compiles the `.cu` kernels on first use. A supported NVIDIA
-driver is required. Installation downloads Python dependencies; it does not
-download a recording.
-
-Other platforms have not been validated in this package. The standard Kilosort
-backend can run where its dependencies install; `deep_tiled` additionally
-requires CUDA and a matching CuPy wheel. The included Windows DLL does not run
-elsewhere.
+The included cuBLAS bridge uses the cuBLAS DLL from the tested PyTorch 2.10
+CUDA 12.8 installation. The package installs the NVRTC runtime required by
+CuPy; other `.cu` kernels compile on first use.
+Installation does not download a recording. Other platforms have not been
+validated in this package; the included Windows DLL does not run elsewhere.
 
 ## Sort
 
