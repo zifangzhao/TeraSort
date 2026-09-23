@@ -13,6 +13,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="terasort", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("backends", help="List available sorting backends")
+    lfp = sub.add_parser("lfp", help="Stream anti-aliased INT16 voltage to an LFP binary")
+    lfp.add_argument("--filename", type=Path, required=True, help="Time-major interleaved INT16 input")
+    lfp.add_argument("--output", type=Path, required=True, help="Time-major interleaved INT16 LFP output")
+    lfp.add_argument("--sample-rate", type=int, required=True, help="Input sample rate in Hz")
+    lfp.add_argument("--n-channels", type=int, required=True)
+    lfp.add_argument("--output-rate", type=int, default=1250)
+    lfp.add_argument("--passband-hz", type=float, default=500.0)
+    lfp.add_argument("--scale-uv-per-count", type=float)
+    lfp.add_argument("--chunk-seconds", type=float, default=5.0)
+    lfp.add_argument("--resume", action="store_true", help="Continue a matching .partial export")
     sort = sub.add_parser("sort", help="Sort one binary recording with Kilosort-compatible output")
     sort.add_argument("--settings", type=Path, required=True,
                       help="JSON dictionary of Kilosort settings, including n_chan_bin")
@@ -33,6 +43,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "backends":
         print("\n".join(available_backends()))
+        return 0
+    if args.command == "lfp":
+        from .lfp import export_lfp
+        result = export_lfp(args.filename, args.output,
+            sample_rate_hz=args.sample_rate, n_channels=args.n_channels,
+            output_rate_hz=args.output_rate, passband_hz=args.passband_hz,
+            scale_uv_per_count=args.scale_uv_per_count,
+            chunk_seconds=args.chunk_seconds, resume=args.resume)
+        print(json.dumps(result, indent=2))
         return 0
     settings = json.loads(args.settings.read_text())
     if not isinstance(settings, dict) or not isinstance(settings.get("n_chan_bin"), int):

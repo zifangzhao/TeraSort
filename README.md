@@ -88,6 +88,30 @@ candidate bank query tool is `terasort-candidates`; see
 [`docs/spike_candidate_bank.md`](docs/spike_candidate_bank.md) and
 [`docs/spike_candidate_waveforms.md`](docs/spike_candidate_waveforms.md).
 
+## Optional 1,250 Hz LFP export
+
+Run this separately only when LFP is needed; sorting does not create or read
+the LFP file:
+
+```powershell
+.\.venv\Scripts\terasort.exe lfp --filename F:\sortingDevelopment\data\recording_int16_uv.bin --output F:\sortingDevelopment\data\recording_lfp_1250_lp500.i16 --sample-rate 32000 --n-channels 384 --scale-uv-per-count 0.05 --passband-hz 500
+```
+
+This reads the original interleaved INT16 voltage in bounded chunks, applies
+an anti-alias FIR, and writes time-major interleaved INT16 at exactly 1,250 Hz.
+The default flat LFP passband is 0–500 Hz, with nominal 60 dB attenuation
+beginning at the 625 Hz output Nyquist frequency. Use `--passband-hz 300` for a
+shorter, faster filter, or another cutoff below 625 Hz. The 500 Hz filter takes
+more CPU time because its transition band is narrower. A JSON sidecar records
+source identity, channel count, sample rates, filtering, scale and any
+saturated output values. Output has the same channel order and
+microvolts-per-count scale as the input. At 600 seconds
+and 384 channels the LFP binary is 576,000,000 bytes, versus 14,745,600,000
+bytes for the 32 kHz source. No full source hash is computed because that would
+add another complete read. If interrupted, rerun the same command with
+`--resume`; completed chunks are retained and the last partial chunk is
+discarded. LFP is derived from raw voltage, not Kilosort's high-pass signal.
+
 ## Scale and evidence
 
 The current accelerated sorter remains a whole-recording Kilosort run. Tiled
