@@ -1,0 +1,1534 @@
+{
+  "control": {
+    "wall_seconds": 214.37926220000008,
+    "stage_seconds": {
+      "runtime_preproc": 0.8248395919799805,
+      "runtime_drift": 40.1168749332428,
+      "runtime_st0": 40.22659969329834,
+      "runtime_clu0": 29.35800266265869,
+      "runtime_st": 36.16755533218384,
+      "runtime_clu": 31.038801193237305,
+      "runtime_merge": 3.4138293266296387,
+      "runtime_postproc": 5.403964519500732
+    },
+    "peak_resources": {
+      "rss_bytes": 3570139136,
+      "private_bytes": 13040979968,
+      "torch_allocated_bytes": 1657360384,
+      "torch_reserved_bytes": 2298478592
+    },
+    "peak_scope": "Worker process; CPU and Torch allocator sampled every 250 ms. GPU excludes non-Torch allocations.",
+    "gpu": "NVIDIA GeForce RTX 5060 Ti",
+    "kilosort": "4.1.7",
+    "torch": "2.10.0+cu128",
+    "settings": {
+      "n_chan_bin": 384,
+      "fs": 32000.0,
+      "tmin": 0.0,
+      "tmax": 600.0,
+      "scale": 0.05000000074505806,
+      "shift": 0.0
+    },
+    "native_reductions": "deep_tiled",
+    "native_setup_seconds": 0.21928440000192495,
+    "deep_cuda_runtime": {
+      "overlap_fallback_calls": 3,
+      "waveform_bank_builds": 1,
+      "learned_mode": "all_parallel"
+    },
+    "universal_tile_samples": 2048,
+    "int16_reader_runtime": {
+      "calls": 1000,
+      "transferred_bytes": 46173227520,
+      "buffers_created": 3,
+      "max_pinned_buffer_bytes": 46173696,
+      "host_read_copy_seconds": 21.067588999914733,
+      "h2d_cuda_seconds": 3.6658135013580324,
+      "decode_cuda_seconds": 0.46863379162549973,
+      "scope": "Summed CUDA events for H2D/decode; host mmap read/copy excludes buffer-reuse waits. No disk/compute prefetch."
+    },
+    "data_dtype": "int16",
+    "io_mode": "int16_cuda"
+  },
+  "native": {
+    "wall_seconds": 208.18573910000123,
+    "stage_seconds": {
+      "runtime_preproc": 0.8287026882171631,
+      "runtime_drift": 38.58623242378235,
+      "runtime_st0": 38.41523361206055,
+      "runtime_clu0": 28.077306747436523,
+      "runtime_st": 34.59264922142029,
+      "runtime_clu": 31.678663730621338,
+      "runtime_merge": 3.3935296535491943,
+      "runtime_postproc": 5.212554931640625
+    },
+    "peak_resources": {
+      "rss_bytes": 3563499520,
+      "private_bytes": 12948897792,
+      "torch_allocated_bytes": 1659121664,
+      "torch_reserved_bytes": 2489319424
+    },
+    "peak_scope": "Worker process; CPU and Torch allocator sampled every 250 ms. GPU excludes non-Torch allocations.",
+    "gpu": "NVIDIA GeForce RTX 5060 Ti",
+    "kilosort": "4.1.7",
+    "torch": "2.10.0+cu128",
+    "settings": {
+      "n_chan_bin": 384,
+      "fs": 32000.0,
+      "tmin": 0.0,
+      "tmax": 600.0,
+      "scale": 0.05000000074505806,
+      "shift": 0.0
+    },
+    "native_reductions": "cublas",
+    "native_setup_seconds": 0.3053260999986378,
+    "deep_cuda_runtime": {
+      "overlap_fallback_calls": 4,
+      "waveform_bank_builds": 1,
+      "cublas_version": 120804,
+      "weight_pack_builds": 0,
+      "learned_mode": "native_filter_pca_cublas",
+      "bridge_dll_sha256": "d9098e4a64a815cb764856a43e5bd1beac70a789a784bf8553751964ff214afd"
+    },
+    "universal_tile_samples": 2048,
+    "int16_reader_runtime": {
+      "calls": 1000,
+      "transferred_bytes": 46173227520,
+      "buffers_created": 3,
+      "max_pinned_buffer_bytes": 46173696,
+      "host_read_copy_seconds": 21.025198099931004,
+      "h2d_cuda_seconds": 3.701062943458557,
+      "decode_cuda_seconds": 0.46006451234221457,
+      "scope": "Summed CUDA events for H2D/decode; host mmap read/copy excludes buffer-reuse waits. No disk/compute prefetch."
+    },
+    "data_dtype": "int16",
+    "io_mode": "int16_cuda"
+  },
+  "control_accuracy": {
+    "sorted_units": 517,
+    "sorted_spikes": 1441232,
+    "ground_truth_units": 250,
+    "ground_truth_spikes": 1026644,
+    "well_recovered_units_iou_08": 229,
+    "mean_unit_accuracy": 0.9535650600154058,
+    "mean_unit_recall": 0.9762296444919767,
+    "mean_unit_precision": 0.9749602391974552,
+    "global_spike_recall": 0.9825070813251721,
+    "global_spike_precision": 0.6998769108651487,
+    "matched_true_positive_spikes": 1008685,
+    "tolerance_ms": 0.4,
+    "hungarian_min_iou": 0.1,
+    "all_clusters_included": true,
+    "curation_applied": false,
+    "per_boundary": []
+  },
+  "native_accuracy": {
+    "sorted_units": 519,
+    "sorted_spikes": 1440042,
+    "ground_truth_units": 250,
+    "ground_truth_spikes": 1026644,
+    "well_recovered_units_iou_08": 230,
+    "mean_unit_accuracy": 0.9540916460582833,
+    "mean_unit_recall": 0.9750057000594391,
+    "mean_unit_precision": 0.9745214652399001,
+    "global_spike_recall": 0.9819236268852689,
+    "global_spike_precision": 0.7000393044091769,
+    "matched_true_positive_spikes": 1008086,
+    "tolerance_ms": 0.4,
+    "hungarian_min_iou": 0.1,
+    "all_clusters_included": true,
+    "curation_applied": false,
+    "per_boundary": []
+  },
+  "speedup": 1.0297499873275364,
+  "worker_time_reduction_percent": 2.889049545389677,
+  "allocated_peak_reduction_percent": -0.10627018824651557,
+  "per_unit_threshold_crossings": {
+    "lost": [
+      "76",
+      "132",
+      "179"
+    ],
+    "gained": [
+      "15",
+      "77",
+      "80",
+      "153"
+    ]
+  },
+  "exact_final_arrays": {
+    "spike_times.npy": false,
+    "spike_clusters.npy": false,
+    "amplitudes.npy": false,
+    "templates.npy": false
+  },
+  "verified_output_checksums": 60,
+  "microbenchmark": {
+    "batches": [
+      {
+        "batch": 0,
+        "convolution": {
+          "trials_ms": {
+            "torch_conv": [
+              11.719099999027094,
+              11.784300000726944,
+              12.139300000853837,
+              11.860800001159078,
+              11.87220000065281,
+              11.860700000397628,
+              12.077199997293064
+            ],
+            "cuda_channel": [
+              6.249899997783359,
+              6.473800000094343,
+              6.299799999396782,
+              6.27350000286242,
+              6.30509999973583,
+              6.296100000326987,
+              6.403799998224713
+            ],
+            "cuda_pca": [
+              6.202800002938602,
+              6.209799998032395,
+              6.292400001257192,
+              6.562799997482216,
+              6.26399999964633,
+              6.743499998265179,
+              6.300600001850398
+            ]
+          },
+          "medians_ms": {
+            "torch_conv": 11.860800001159078,
+            "cuda_channel": 6.299799999396782,
+            "cuda_pca": 6.292400001257192
+          }
+        },
+        "projection": {
+          "trials_ms": {
+            "einsum": [
+              13.319599998794729,
+              13.321900001756148,
+              13.34359999964363,
+              13.563000000431202,
+              13.470199999574106,
+              13.629500001115957,
+              13.530100000934908
+            ],
+            "torch_mm_channel": [
+              10.392899999715155,
+              10.395600002084393,
+              10.457300002599368,
+              10.566400000243448,
+              10.549200000241399,
+              10.550400002102833,
+              10.624999998981366
+            ],
+            "torch_mm_pca_copy": [
+              13.606200001959223,
+              13.262600001326064,
+              13.366499999392545,
+              13.453899999149144,
+              13.571100000262959,
+              13.457700002618367,
+              13.94119999895338
+            ],
+            "cublas_channel": [
+              10.422200000903104,
+              10.721700000431156,
+              10.525699999561766,
+              10.955800000374438,
+              10.564899999735644,
+              10.820600000442937,
+              10.64799999949173
+            ],
+            "cublas_pca_copy": [
+              13.558900001953589,
+              13.266799996927148,
+              13.565299999754643,
+              13.328000000910833,
+              13.634999999339925,
+              13.506700001016725,
+              13.951299999462208
+            ]
+          },
+          "medians_ms": {
+            "einsum": 13.470199999574106,
+            "torch_mm_channel": 10.549200000241399,
+            "torch_mm_pca_copy": 13.457700002618367,
+            "cublas_channel": 10.64799999949173,
+            "cublas_pca_copy": 13.558900001953589
+          }
+        },
+        "convolution_errors": {
+          "torch_conv": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_channel": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_pca": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_errors": {
+          "einsum": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "torch_mm_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "torch_mm_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cublas_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "cublas_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_incremental_peak_bytes": {
+          "einsum": 678416896,
+          "torch_mm_channel": 124332544,
+          "torch_mm_pca_copy": 678416896,
+          "cublas_channel": 124332544,
+          "cublas_pca_copy": 678416896
+        },
+        "learned": {
+          "trials_ms": {
+            "deep_control": [
+              65.84450000082143,
+              66.57629999972414,
+              65.65369999952964,
+              66.31619999825489,
+              66.57439999980852,
+              66.49290000132169,
+              66.97390000044834
+            ],
+            "projection": [
+              62.82269999792334,
+              63.51310000172816,
+              63.63299999793526,
+              63.17090000084136,
+              62.84299999970244,
+              62.93589999768301,
+              64.36369999937597
+            ],
+            "filter_pca": [
+              57.67810000179452,
+              58.14040000041132,
+              57.647600002383115,
+              57.49170000126469,
+              57.36790000082692,
+              58.22460000126739,
+              57.6450999978988
+            ],
+            "filter_channel": [
+              57.33899999904679,
+              57.217100002162624,
+              60.62530000053812,
+              57.92469999869354,
+              57.60460000237799,
+              56.788800000504125,
+              57.67139999807114
+            ]
+          },
+          "medians_ms": {
+            "deep_control": 66.49290000132169,
+            "projection": 63.17090000084136,
+            "filter_pca": 57.647600002383115,
+            "filter_channel": 57.60460000237799
+          }
+        },
+        "learned_errors": {
+          "deep_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 4951,
+            "events_expected": 4951,
+            "common_coordinates": 4951,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "projection": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 4951,
+            "events_expected": 4951,
+            "common_coordinates": 4951,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.0517578125e-05,
+              9.5367431640625e-06
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_pca": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 4951,
+            "events_expected": 4951,
+            "common_coordinates": 4951,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_channel": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 4951,
+            "events_expected": 4951,
+            "common_coordinates": 4951,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.0517578125e-05,
+              9.5367431640625e-06
+            ],
+            "aligned_coordinates": true
+          }
+        },
+        "learned_incremental_peak_bytes": {
+          "deep_control": 1232505344,
+          "projection": 678420992,
+          "filter_pca": 678420992,
+          "filter_channel": 678420992
+        },
+        "universal": {
+          "trials_ms": {
+            "tiled_control": [
+              62.9397999982757,
+              62.532600000849925,
+              62.19770000097924,
+              62.95250000039232,
+              63.17190000117989,
+              63.32789999942179,
+              62.50420000287704
+            ],
+            "native_filter": [
+              58.347199999843724,
+              60.76609999945504,
+              57.46269999872311,
+              57.09320000096341,
+              57.39679999896907,
+              57.61250000068685,
+              58.59259999851929
+            ]
+          },
+          "medians_ms": {
+            "tiled_control": 62.9397999982757,
+            "native_filter": 57.61250000068685
+          }
+        },
+        "universal_errors": {
+          "tiled_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2856,
+            "events_expected": 2856,
+            "common_coordinates": 2856,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "native_filter": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2856,
+            "events_expected": 2856,
+            "common_coordinates": 2856,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          }
+        }
+      },
+      {
+        "batch": 47,
+        "convolution": {
+          "trials_ms": {
+            "torch_conv": [
+              11.860800001159078,
+              11.87950000166893,
+              12.043099999573315,
+              11.846699999296106,
+              11.862100000143982,
+              11.96929999787244,
+              11.849800001073163
+            ],
+            "cuda_channel": [
+              6.285799998295261,
+              6.389699999999721,
+              6.311699999059783,
+              6.281400001171278,
+              6.314300000667572,
+              6.298799999058247,
+              6.766600003174972
+            ],
+            "cuda_pca": [
+              6.217500002094312,
+              6.267799999477575,
+              6.295399998634821,
+              6.4481999979761895,
+              6.275499999901513,
+              6.505200002720812,
+              6.334599998808699
+            ]
+          },
+          "medians_ms": {
+            "torch_conv": 11.862100000143982,
+            "cuda_channel": 6.311699999059783,
+            "cuda_pca": 6.295399998634821
+          }
+        },
+        "projection": {
+          "trials_ms": {
+            "einsum": [
+              13.426899997284636,
+              13.33119999981136,
+              13.365900002099806,
+              13.705299999855924,
+              13.495600000169361,
+              13.95789999878616,
+              13.583899999503046
+            ],
+            "torch_mm_channel": [
+              10.431200000311946,
+              10.541299998294562,
+              10.430900001665577,
+              10.567900000751251,
+              10.567200002697064,
+              10.617400002956856,
+              10.634700000082375
+            ],
+            "torch_mm_pca_copy": [
+              13.621099998999853,
+              13.451800001348602,
+              13.58790000085719,
+              13.417099999060156,
+              13.74240000222926,
+              13.48130000042147,
+              14.01110000006156
+            ],
+            "cublas_channel": [
+              10.581099999399157,
+              11.092899996583583,
+              10.578299999906449,
+              11.1295999995491,
+              10.61420000041835,
+              11.070300002756994,
+              10.724100000516046
+            ],
+            "cublas_pca_copy": [
+              13.862200001312885,
+              13.361299999814946,
+              13.81769999716198,
+              13.385399997787317,
+              13.90700000047218,
+              13.526399998227134,
+              13.993799999298062
+            ]
+          },
+          "medians_ms": {
+            "einsum": 13.495600000169361,
+            "torch_mm_channel": 10.567200002697064,
+            "torch_mm_pca_copy": 13.58790000085719,
+            "cublas_channel": 10.724100000516046,
+            "cublas_pca_copy": 13.81769999716198
+          }
+        },
+        "convolution_errors": {
+          "torch_conv": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_channel": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_pca": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_errors": {
+          "einsum": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "torch_mm_channel": {
+            "exact": false,
+            "max_abs": 0.00244140625
+          },
+          "torch_mm_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cublas_channel": {
+            "exact": false,
+            "max_abs": 0.00244140625
+          },
+          "cublas_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_incremental_peak_bytes": {
+          "einsum": 678416896,
+          "torch_mm_channel": 124332544,
+          "torch_mm_pca_copy": 678416896,
+          "cublas_channel": 124332544,
+          "cublas_pca_copy": 678416896
+        },
+        "learned": {
+          "trials_ms": {
+            "deep_control": [
+              66.24350000129198,
+              65.72030000097584,
+              66.24899999951595,
+              65.90890000006766,
+              65.67480000012438,
+              66.02689999999711,
+              65.65760000012233
+            ],
+            "projection": [
+              62.65279999934137,
+              62.57090000144672,
+              63.51449999783654,
+              65.63199999800418,
+              62.336300001334166,
+              62.4997999984771,
+              66.25940000230912
+            ],
+            "filter_pca": [
+              57.46990000261576,
+              56.56710000039311,
+              56.98620000111987,
+              57.54969999907189,
+              56.30670000027749,
+              57.27440000191564,
+              56.56900000030873
+            ],
+            "filter_channel": [
+              57.718000000022585,
+              56.95740000010119,
+              58.79800000184332,
+              57.906800000637304,
+              57.613900000433205,
+              56.950899997900706,
+              65.26030000168248
+            ]
+          },
+          "medians_ms": {
+            "deep_control": 65.90890000006766,
+            "projection": 62.65279999934137,
+            "filter_pca": 56.98620000111987,
+            "filter_channel": 57.718000000022585
+          }
+        },
+        "learned_errors": {
+          "deep_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 5012,
+            "events_expected": 5012,
+            "common_coordinates": 5012,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "projection": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 5012,
+            "events_expected": 5012,
+            "common_coordinates": 5012,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.814697265625e-05,
+              9.298324584960938e-06
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_pca": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 5012,
+            "events_expected": 5012,
+            "common_coordinates": 5012,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_channel": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 5012,
+            "events_expected": 5012,
+            "common_coordinates": 5012,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.814697265625e-05,
+              9.298324584960938e-06
+            ],
+            "aligned_coordinates": true
+          }
+        },
+        "learned_incremental_peak_bytes": {
+          "deep_control": 1232505344,
+          "projection": 678420992,
+          "filter_pca": 678420992,
+          "filter_channel": 678420992
+        },
+        "universal": {
+          "trials_ms": {
+            "tiled_control": [
+              63.99690000034752,
+              62.95759999920847,
+              62.75649999952293,
+              63.78720000066096,
+              64.96029999834718,
+              63.94999999974971,
+              64.16700000045239
+            ],
+            "native_filter": [
+              58.813400002691196,
+              57.33460000192281,
+              60.157199997775024,
+              57.805199998256285,
+              57.63260000094306,
+              56.90799999865703,
+              57.27919999844744
+            ]
+          },
+          "medians_ms": {
+            "tiled_control": 63.94999999974971,
+            "native_filter": 57.63260000094306
+          }
+        },
+        "universal_errors": {
+          "tiled_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2869,
+            "events_expected": 2869,
+            "common_coordinates": 2869,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "native_filter": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2869,
+            "events_expected": 2869,
+            "common_coordinates": 2869,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          }
+        }
+      },
+      {
+        "batch": 160,
+        "convolution": {
+          "trials_ms": {
+            "torch_conv": [
+              11.7924000005587,
+              11.750800000299932,
+              12.276999997993698,
+              11.895999999978812,
+              11.845100001664832,
+              11.874300002091331,
+              12.108599999919534
+            ],
+            "cuda_channel": [
+              6.280400000832742,
+              6.420400000934023,
+              6.305500002781628,
+              6.323300000076415,
+              6.325199999992037,
+              6.327000002784189,
+              6.4435000022058375
+            ],
+            "cuda_pca": [
+              6.211100000655279,
+              6.395600001269486,
+              6.264899999223417,
+              6.775899997592205,
+              6.29309999931138,
+              6.8008999987796415,
+              6.292999998549931
+            ]
+          },
+          "medians_ms": {
+            "torch_conv": 11.874300002091331,
+            "cuda_channel": 6.325199999992037,
+            "cuda_pca": 6.29309999931138
+          }
+        },
+        "projection": {
+          "trials_ms": {
+            "einsum": [
+              13.427399997453904,
+              13.684199999261182,
+              13.35540000218316,
+              13.958499999716878,
+              13.542200002120808,
+              13.912800000980496,
+              13.578499998402549
+            ],
+            "torch_mm_channel": [
+              10.670200001186458,
+              10.472999998455634,
+              10.6965000013588,
+              10.59480000185431,
+              10.845700002391823,
+              10.675599998648977,
+              10.99640000029467
+            ],
+            "torch_mm_pca_copy": [
+              13.446799999655923,
+              13.357100000575883,
+              13.350700002774829,
+              13.459399997373112,
+              13.540299998567207,
+              13.698200000362704,
+              13.555000001360895
+            ],
+            "cublas_channel": [
+              10.531200001423713,
+              10.981700001138961,
+              10.513799999898765,
+              10.652299999492243,
+              10.700599999836413,
+              10.684999997465638,
+              10.684799999580719
+            ],
+            "cublas_pca_copy": [
+              13.796999999613035,
+              13.355800001590978,
+              13.629999997647246,
+              13.39680000091903,
+              13.664300000527874,
+              13.528100000257837,
+              14.017900000908412
+            ]
+          },
+          "medians_ms": {
+            "einsum": 13.578499998402549,
+            "torch_mm_channel": 10.675599998648977,
+            "torch_mm_pca_copy": 13.459399997373112,
+            "cublas_channel": 10.684799999580719,
+            "cublas_pca_copy": 13.629999997647246
+          }
+        },
+        "convolution_errors": {
+          "torch_conv": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_channel": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_pca": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_errors": {
+          "einsum": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "torch_mm_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "torch_mm_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cublas_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "cublas_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_incremental_peak_bytes": {
+          "einsum": 678416896,
+          "torch_mm_channel": 124332544,
+          "torch_mm_pca_copy": 678416896,
+          "cublas_channel": 124332544,
+          "cublas_pca_copy": 678416896
+        },
+        "learned": {
+          "trials_ms": {
+            "deep_control": [
+              65.74840000030235,
+              64.43990000116173,
+              71.27959999706945,
+              70.08639999912702,
+              71.58440000057453,
+              70.9683999994013,
+              70.03380000242032
+            ],
+            "projection": [
+              68.90500000008615,
+              68.88329999856069,
+              62.16619999759132,
+              63.283199997385964,
+              61.5512000003946,
+              69.75009999950998,
+              68.81499999872176
+            ],
+            "filter_pca": [
+              57.604300000093644,
+              61.49540000114939,
+              61.43950000114273,
+              58.79550000099698,
+              61.05250000109663,
+              61.96849999832921,
+              61.57720000192057
+            ],
+            "filter_channel": [
+              59.762199998658616,
+              59.036599999672035,
+              55.574199999682605,
+              60.582500002055895,
+              62.87200000224402,
+              58.00520000047982,
+              57.26890000005369
+            ]
+          },
+          "medians_ms": {
+            "deep_control": 70.08639999912702,
+            "projection": 68.81499999872176,
+            "filter_pca": 61.43950000114273,
+            "filter_channel": 59.036599999672035
+          }
+        },
+        "learned_errors": {
+          "deep_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 4963,
+            "events_expected": 4963,
+            "common_coordinates": 4963,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "projection": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 4963,
+            "events_expected": 4963,
+            "common_coordinates": 4963,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.0517578125e-05,
+              8.52346420288086e-06
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_pca": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 4963,
+            "events_expected": 4963,
+            "common_coordinates": 4963,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_channel": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 4963,
+            "events_expected": 4963,
+            "common_coordinates": 4963,
+            "max_abs_errors": [
+              0.0,
+              1.430511474609375e-06,
+              3.0517578125e-05,
+              8.52346420288086e-06
+            ],
+            "aligned_coordinates": true
+          }
+        },
+        "learned_incremental_peak_bytes": {
+          "deep_control": 1232505344,
+          "projection": 678420992,
+          "filter_pca": 678420992,
+          "filter_channel": 678420992
+        },
+        "universal": {
+          "trials_ms": {
+            "tiled_control": [
+              64.35260000216658,
+              65.18449999930453,
+              64.41329999870504,
+              66.56690000090748,
+              66.38860000020941,
+              64.97039999885601,
+              65.24540000100387
+            ],
+            "native_filter": [
+              60.241099999984726,
+              58.65479999920353,
+              58.85180000041146,
+              57.33610000243061,
+              59.322000000975095,
+              57.17540000114241,
+              59.537599998293445
+            ]
+          },
+          "medians_ms": {
+            "tiled_control": 65.18449999930453,
+            "native_filter": 58.85180000041146
+          }
+        },
+        "universal_errors": {
+          "tiled_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2769,
+            "events_expected": 2769,
+            "common_coordinates": 2769,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "native_filter": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2769,
+            "events_expected": 2769,
+            "common_coordinates": 2769,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          }
+        }
+      },
+      {
+        "batch": 319,
+        "convolution": {
+          "trials_ms": {
+            "torch_conv": [
+              12.291499999264488,
+              12.316000000282656,
+              11.932299999898532,
+              11.917499999981374,
+              11.938999999983935,
+              12.332700000115437,
+              11.90620000124909
+            ],
+            "cuda_channel": [
+              6.381999999575783,
+              6.252099999983329,
+              6.814399999711895,
+              6.341799999063369,
+              6.769100000383332,
+              6.338200000755023,
+              6.306800001766533
+            ],
+            "cuda_pca": [
+              6.284700000833254,
+              6.215599998540711,
+              6.354499997542007,
+              6.292099998972844,
+              6.359099999826867,
+              6.313199999567587,
+              6.793500000640051
+            ]
+          },
+          "medians_ms": {
+            "torch_conv": 11.938999999983935,
+            "cuda_channel": 6.341799999063369,
+            "cuda_pca": 6.313199999567587
+          }
+        },
+        "projection": {
+          "trials_ms": {
+            "einsum": [
+              13.40360000176588,
+              13.381700002355501,
+              13.46420000118087,
+              13.457900000503287,
+              13.496799998392817,
+              13.813500001560897,
+              13.863100000889972
+            ],
+            "torch_mm_channel": [
+              10.451499998453073,
+              10.980000002746237,
+              10.46209999913117,
+              11.0231999969983,
+              10.615399998641806,
+              10.651299999153707,
+              10.661299998901086
+            ],
+            "torch_mm_pca_copy": [
+              13.835999998264015,
+              13.351699999475386,
+              13.806799997837516,
+              13.457999997626757,
+              13.76199999867822,
+              13.507399999070913,
+              14.135000001260778
+            ],
+            "cublas_channel": [
+              10.588000001007458,
+              10.938000003079651,
+              10.512700002436759,
+              10.950899999443209,
+              10.629300002619857,
+              10.9651999991911,
+              10.734199997386895
+            ],
+            "cublas_pca_copy": [
+              13.380600001255516,
+              13.385000002017478,
+              13.552000000345288,
+              13.419899998552864,
+              13.893699997424847,
+              13.525899998057866,
+              13.56110000051558
+            ]
+          },
+          "medians_ms": {
+            "einsum": 13.46420000118087,
+            "torch_mm_channel": 10.651299999153707,
+            "torch_mm_pca_copy": 13.76199999867822,
+            "cublas_channel": 10.734199997386895,
+            "cublas_pca_copy": 13.525899998057866
+          }
+        },
+        "convolution_errors": {
+          "torch_conv": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_channel": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cuda_pca": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_errors": {
+          "einsum": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "torch_mm_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "torch_mm_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          },
+          "cublas_channel": {
+            "exact": false,
+            "max_abs": 0.001953125
+          },
+          "cublas_pca_copy": {
+            "exact": true,
+            "max_abs": 0.0
+          }
+        },
+        "projection_incremental_peak_bytes": {
+          "einsum": 678416896,
+          "torch_mm_channel": 124332544,
+          "torch_mm_pca_copy": 678416896,
+          "cublas_channel": 124332544,
+          "cublas_pca_copy": 678416896
+        },
+        "learned": {
+          "trials_ms": {
+            "deep_control": [
+              71.4996999995492,
+              69.94819999817992,
+              74.88290000037523,
+              69.42449999769451,
+              70.26519999999437,
+              75.91369999863673,
+              68.99319999865838
+            ],
+            "projection": [
+              70.27870000092662,
+              67.76520000130404,
+              68.95220000296831,
+              68.81930000236025,
+              73.17759999932605,
+              67.25139999980456,
+              72.23119999980554
+            ],
+            "filter_pca": [
+              63.89390000185813,
+              68.13590000092518,
+              61.584399998537265,
+              60.831999999209074,
+              60.43060000229161,
+              65.14160000006086,
+              64.67709999924409
+            ],
+            "filter_channel": [
+              60.381799998140195,
+              62.47090000033495,
+              60.31689999872469,
+              60.23999999888474,
+              60.85470000107307,
+              60.32769999728771,
+              62.12670000240905
+            ]
+          },
+          "medians_ms": {
+            "deep_control": 70.26519999999437,
+            "projection": 68.95220000296831,
+            "filter_pca": 63.89390000185813,
+            "filter_channel": 60.381799998140195
+          }
+        },
+        "learned_errors": {
+          "deep_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 5074,
+            "events_expected": 5074,
+            "common_coordinates": 5074,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "projection": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 5074,
+            "events_expected": 5074,
+            "common_coordinates": 5074,
+            "max_abs_errors": [
+              0.0,
+              1.2516975402832031e-06,
+              2.288818359375e-05,
+              7.62939453125e-06
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_pca": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 5074,
+            "events_expected": 5074,
+            "common_coordinates": 5074,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "filter_channel": {
+            "exact": [
+              true,
+              false,
+              false,
+              false
+            ],
+            "events_actual": 5074,
+            "events_expected": 5074,
+            "common_coordinates": 5074,
+            "max_abs_errors": [
+              0.0,
+              1.2516975402832031e-06,
+              2.288818359375e-05,
+              7.62939453125e-06
+            ],
+            "aligned_coordinates": true
+          }
+        },
+        "learned_incremental_peak_bytes": {
+          "deep_control": 1232505344,
+          "projection": 678420992,
+          "filter_pca": 678420992,
+          "filter_channel": 678420992
+        },
+        "universal": {
+          "trials_ms": {
+            "tiled_control": [
+              63.5943999986921,
+              65.95670000024256,
+              64.20339999749558,
+              63.89560000025085,
+              64.16080000053626,
+              63.54070000088541,
+              65.20520000049146
+            ],
+            "native_filter": [
+              57.43309999888879,
+              57.626000001619104,
+              57.304199999634875,
+              57.676000000356,
+              59.20259999766131,
+              57.32720000014524,
+              59.8969999991823
+            ]
+          },
+          "medians_ms": {
+            "tiled_control": 64.16080000053626,
+            "native_filter": 57.626000001619104
+          }
+        },
+        "universal_errors": {
+          "tiled_control": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2838,
+            "events_expected": 2838,
+            "common_coordinates": 2838,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          },
+          "native_filter": {
+            "exact": [
+              true,
+              true,
+              true,
+              true
+            ],
+            "events_actual": 2838,
+            "events_expected": 2838,
+            "common_coordinates": 2838,
+            "max_abs_errors": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "aligned_coordinates": true
+          }
+        }
+      }
+    ],
+    "pooled_median_ms": {
+      "convolution": {
+        "torch_conv": 11.887750000823871,
+        "cuda_channel": 6.3188000003719935,
+        "cuda_pca": 6.2942499989731004
+      },
+      "projection": {
+        "einsum": 13.496199999281089,
+        "torch_mm_channel": 10.58135000130278,
+        "torch_mm_pca_copy": 13.52384999881906,
+        "cublas_channel": 10.684899998523179,
+        "cublas_pca_copy": 13.555450001149438
+      },
+      "learned": {
+        "deep_control": 66.57534999976633,
+        "projection": 63.99834999865561,
+        "filter_pca": 58.182500000839354,
+        "filter_channel": 58.40160000116157
+      },
+      "universal": {
+        "tiled_control": 63.973450000048615,
+        "native_filter": 57.65430000064953
+      }
+    },
+    "cublas_version": 120804,
+    "weight_pack_builds": 1,
+    "device": "NVIDIA GeForce RTX 5060 Ti",
+    "torch_version": "2.10.0+cu128",
+    "matmul_precision": "none",
+    "cudnn_conv_precision": "tf32",
+    "U_shape": [
+      517,
+      6,
+      384
+    ],
+    "ops_path": "F:\\sortingDevelopment\\bounded_sorting_v1\\jobs\\deep_tiled_int16\\attempt_001\\kilosort\\ops.npy",
+    "ops_sha256": "6318dcc0717284f7559d89eed2ce2b0ec9474f7336a08bf97d80e36d6faf9780",
+    "scope": "Four real processed batches, final saved templates projected onto PCA, seven warmed rotating trials per batch. Timings include output allocations; exclude I/O/preprocessing and one-time model packing/compilation. Learned matching includes peels and residual updates. Memory is incremental Torch allocation, excludes native cuBLAS private workspace. Direct cuBLAS uses FP32 SGEMM with default math mode; custom filter uses FP32 FMA. No INT16-to-FP32 quantization change. This is not full-sort accuracy or end-to-end speed.",
+    "source_sha256": {
+      "cublas_bridge.cpp": "6787de60460023c4e50c8404160abdb4611a3405ec1a02beb1fb73a4fd034c90",
+      "kilosort_cublas.py": "00a0407b8d8ad216e122e74e54dee5d5b3174e54ff95026091d47cd6d62ab06d",
+      "kilosort_cublas.cu": "206da52bc69cd8248bd2845d159332c74ff14ad3e753329cb80238cc552d4049",
+      "kilosort_deep.py": "e4de996bd2d964e64737f15c0ba8a38b8ea3616530cc9099afcb80197fae8bd3",
+      "kilosort_deep.cu": "cf798c39970abe71cd7327f42ea75d3657b6bbc0895e6479389304dc9537d4e0",
+      "kilosort_tiled.py": "7bd738f8dbb7c5966cc5245910b601e774dc9962be5507cf4c45b36d69a0abce",
+      "kilosort_native.py": "a494ca26d606fa64ea3aa806b9eee2b8323d5b9599709e50b510aa7bbb25c80b",
+      "kilosort_reductions.cu": "e65711748a199ebdce04df4791839d8362e7b276d43b7714346b41f258553990",
+      "benchmark_kilosort_cublas.py": "0faca5ae15c7e3d5bfb0de287e833be1997f25c7adb3ccc4402787df96e7bfe5",
+      "cublas_bridge.dll": "d9098e4a64a815cb764856a43e5bd1beac70a789a784bf8553751964ff214afd"
+    }
+  },
+  "selected_path_all_fixed_model_outputs_exact": true,
+  "scope": "Fresh native INT16 full sort followed by fresh tiled INT16 control. Each input fully pre-read and SHA256 verified before timing. One warmed run per route, no concurrent GPU benchmark. Not a randomized repeated full-run comparison or cold-disk benchmark. Torch allocator peaks exclude native library workspace and other non-Torch VRAM."
+}
