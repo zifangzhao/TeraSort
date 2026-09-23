@@ -1,5 +1,6 @@
 """Scoped INT16 disk/H2D reader for Kilosort 4.1.7; FP32 processing unchanged."""
 from contextlib import contextmanager
+from bisect import bisect_right
 import hashlib
 import importlib.metadata
 import inspect
@@ -21,6 +22,21 @@ def channel_calibration(value, channels, default):
     if array.shape != (channels,) or not np.isfinite(array).all():
         raise ValueError('Calibration must be finite, scalar or one value per channel')
     return np.ascontiguousarray(array)
+
+
+def source_slice(reader, start, stop):
+    """Read only the files overlapping a batch, even in a long file list."""
+    source = reader.file
+    if not hasattr(source, "split_indices") or source._filenames is None:
+        return source[start:stop]
+    pieces = []
+    while start < stop:
+        index = bisect_right(source.split_indices, start)
+        previous = 0 if index == 0 else source.split_indices[index - 1]
+        end = min(stop, source.split_indices[index])
+        pieces.append(source.get_file(index)[start - previous:end - previous])
+        start = end
+    return pieces[0] if len(pieces) == 1 else np.concatenate(pieces, axis=0)
 
 
 class Int16Reader:
@@ -68,7 +84,7 @@ class Int16Reader:
             # Covers callers switching CUDA streams between reads.
             stream.wait_event(state['decode_done'])
         begin = time.perf_counter()
-        raw = reader.file[bstart:bend]
+        raw = source_slice(reader, bstart, bend)
         nsamp = len(raw)
         left_pad = int(reader.nt) if original_batch == 0 else 0
         if nsamp <= 0 or nsamp+left_pad > output_samples:
@@ -130,14 +146,14 @@ def native_int16_reader(filename):
     original = io.BinaryRWFile.padded_batch_to_torch
     if hashlib.sha256(inspect.getsource(original).encode()).hexdigest() != EXPECTED_READER_SHA256:
         raise RuntimeError('Kilosort reader changed; refusing unverified substitution')
-    target = Path(filename).resolve()
+    target = tuple(Path(name).resolve() for name in
+                   (filename if isinstance(filename, (list, tuple)) else [filename]))
     backend = Int16Reader()
 
     def replacement(reader, ibatch, return_inds=False):
         path = reader.filename
-        if isinstance(path, list):
-            path = path[0] if len(path) == 1 else None
-        if path is not None and Path(path).resolve() == target:
+        paths = path if isinstance(path, (list, tuple)) else [path]
+        if path is not None and tuple(Path(name).resolve() for name in paths) == target:
             return backend.read(reader, ibatch, return_inds)
         return original(reader, ibatch, return_inds)
 

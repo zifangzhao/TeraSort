@@ -36,7 +36,7 @@ def test_backend_and_reader_guard():
     with pytest.raises(ValueError, match="Unknown"):
         _select_backend("missing", None, {})
     assert _use_int16_reader("x.bin", None, None, "cublas", True)
-    assert not _use_int16_reader(["x.bin"], None, None, "cublas", True)
+    assert _use_int16_reader(["x.bin", "y.bin"], None, None, "cublas", True)
     assert not _use_int16_reader("x.bin", None, "float32", "cublas", True)
     assert not _use_int16_reader("x.bin", object(), "int16", "cublas", True)
 
@@ -69,6 +69,37 @@ def test_cli_drift_switch(monkeypatch, tmp_path):
                      "--results-dir", str(tmp_path / "out"),
                      "--skip-drift-correction"]) == 0
     assert calls[-1]["skip_drift_correction"] is True
+
+
+def test_cli_passes_ordered_files(monkeypatch, tmp_path):
+    import numpy as np
+    import terasort.cli as cli
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text('{"n_chan_bin": 2, "fs": 20000}')
+    files = [tmp_path / "a.bin", tmp_path / "b.bin"]
+    for file in files:
+        np.zeros((100, 2), dtype=np.int16).tofile(file)
+    calls = []
+    monkeypatch.setattr(cli, "run_kilosort", lambda *args, **kwargs: calls.append(kwargs))
+    assert cli.main(["sort", "--settings", str(settings_file),
+                     "--filename", str(files[0]), "--filename", str(files[1]),
+                     "--results-dir", str(tmp_path / "out")]) == 0
+    assert calls[-1]["filename"] == files
+
+
+def test_api_writes_source_map_after_multifile_sort(monkeypatch, tmp_path):
+    import json
+    import numpy as np
+    files = [tmp_path / "a.bin", tmp_path / "b.bin"]
+    for file in files:
+        np.zeros((100, 2), dtype=np.int16).tofile(file)
+    monkeypatch.setattr(kilosort, "run_kilosort", lambda *args, **kwargs: ("sorted",))
+    output = tmp_path / "sort"
+    assert run_kilosort({"n_chan_bin": 2, "fs": 20000}, filename=files,
+                        results_dir=output, backend="standard") == ("sorted",)
+    manifest = json.loads((output / "session_sources.json").read_text())
+    assert manifest["virtual_total_samples"] == 200
+    assert manifest["sources"][1]["virtual_start_sample"] == 100
 
 
 def test_parallel_lfp_completes_with_sort(monkeypatch, tmp_path):

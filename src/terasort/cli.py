@@ -31,10 +31,11 @@ def main(argv=None):
     lfp.add_argument("--workers", type=int, default=8,
                      help="CPU channel-filter workers (default 8)")
     lfp.add_argument("--resume", action="store_true", help="Continue a matching .partial export")
-    sort = sub.add_parser("sort", help="Sort one binary recording with Kilosort-compatible output")
+    sort = sub.add_parser("sort", help="Sort one or more ordered binary files into one Kilosort session")
     sort.add_argument("--settings", type=Path, required=True,
                       help="JSON dictionary of Kilosort settings, including n_chan_bin")
-    sort.add_argument("--filename", type=Path, required=True, help="Raw binary file")
+    sort.add_argument("--filename", type=Path, required=True, action="append",
+                      help="Raw binary file; repeat in acquisition order for one shared session")
     probe = sort.add_mutually_exclusive_group()
     probe.add_argument("--probe-name", help="Bundled Kilosort probe name")
     probe.add_argument("--probe-json", type=Path, help="Probe dictionary saved as JSON")
@@ -84,8 +85,9 @@ def main(argv=None):
                            ("yc", np.float32), ("kcoords", np.float32)):
             if key in probe_dict:
                 probe_dict[key] = np.asarray(probe_dict[key], dtype=dtype)
+    filename = args.filename[0] if len(args.filename) == 1 else args.filename
     run_kilosort(settings, probe=probe_dict, probe_name=args.probe_name,
-                 filename=args.filename, results_dir=args.results_dir,
+                 filename=filename, results_dir=args.results_dir,
                  data_dtype=args.data_dtype, backend=args.backend,
                  fast_int16=not args.no_fast_int16,
                  skip_drift_correction=args.skip_drift_correction,

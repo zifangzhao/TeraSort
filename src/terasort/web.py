@@ -124,22 +124,37 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     if not isinstance(data, dict):
         raise ValueError("Expected a JSON object")
     request = {}
-    for field in ("filename", "settings"):
-        value = data.get(field)
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{field} is required")
-        path = Path(value).expanduser().resolve(strict=True)
+    names = data.get("filenames")
+    if names is None:
+        names = [data.get("filename")]
+    if not isinstance(names, list) or not names or any(not isinstance(n, str) or not n.strip() for n in names):
+        raise ValueError("At least one filename is required")
+    paths = []
+    for name in names:
+        path = Path(name).expanduser().resolve(strict=True)
         if not path.is_file():
-            raise ValueError(f"{field} must be a file")
-        request[field] = str(path)
-    source_bytes = Path(request["filename"]).stat().st_size
-    if source_bytes == 0:
-        raise ValueError("Input recording is empty")
+            raise ValueError("Each filename must be a file")
+        paths.append(str(path))
+    if len({os.path.normcase(p) for p in paths}) != len(paths):
+        raise ValueError("The same input file was selected more than once")
+    request["filename"] = paths[0]
+    request["filenames"] = paths
+    value = data.get("settings")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("settings is required")
+    settings_path = Path(value).expanduser().resolve(strict=True)
+    if not settings_path.is_file():
+        raise ValueError("settings must be a file")
+    request["settings"] = str(settings_path)
     settings = json.loads(Path(request["settings"]).read_text(encoding="utf-8"))
     if not isinstance(settings, dict) or type(settings.get("n_chan_bin")) is not int or settings["n_chan_bin"] <= 0:
         raise ValueError("Settings must contain a positive integer n_chan_bin")
-    if source_bytes % (2 * settings["n_chan_bin"]):
-        raise ValueError("INT16 recording size is not divisible by n_chan_bin")
+    for path in paths:
+        source_bytes = Path(path).stat().st_size
+        if not source_bytes or source_bytes % (2 * settings["n_chan_bin"]):
+            raise ValueError(f"INT16 recording is empty or size is not divisible by n_chan_bin: {path}")
+    if len(paths) > 1 and (not isinstance(settings.get("fs"), (int, float)) or settings["fs"] <= 0):
+        raise ValueError("Multi-file sessions require positive fs in settings")
     output = data.get("results_dir")
     if not isinstance(output, str) or not output.strip():
         raise ValueError("results_dir is required")
@@ -171,10 +186,12 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     for key in ("skip_drift_correction", "no_fast_int16"):
         request[key] = bool(data.get(key, False))
     if data.get("lfp_output"):
+        if len(paths) > 1:
+            raise ValueError("Parallel LFP output currently supports one source file per run")
         lfp_path = Path(data["lfp_output"]).expanduser().resolve()
         if lfp_path.exists():
             raise ValueError("LFP output already exists")
-        if lfp_path == Path(request["filename"]):
+        if lfp_path in map(Path, paths):
             raise ValueError("LFP output cannot overwrite the input")
         request["lfp_output"] = str(lfp_path)
     return request

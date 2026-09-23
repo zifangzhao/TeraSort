@@ -11,8 +11,10 @@ def main() -> int:
     job_file = Path(sys.argv[1])
     job = json.loads(job_file.read_text(encoding="utf-8"))
     request = job["request"]
-    args = ["sort", "--settings", request["settings"], "--filename", request["filename"],
+    args = ["sort", "--settings", request["settings"],
             "--results-dir", request["results_dir"], "--backend", request["backend"]]
+    for filename in request.get("filenames", [request["filename"]]):
+        args += ["--filename", filename]
     if request.get("probe_json"):
         args += ["--probe-json", request["probe_json"]]
     elif request.get("probe_name"):

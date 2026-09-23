@@ -66,7 +66,8 @@ Launch the local web service after installation:
 .\.venv\Scripts\terasort.exe web
 ```
 
-It opens `http://127.0.0.1:8765/`. Select a raw binary, settings JSON, probe
+It opens `http://127.0.0.1:8765/`. Select one or more raw binaries in
+acquisition order, settings JSON, probe
 JSON (or bundled probe name), and a new results directory. The browser lists
 files on the recording machine; it never uploads the raw data. Jobs run one at
 a time to avoid GPU contention. The queue and logs persist in
@@ -116,7 +117,7 @@ result = run_kilosort(
 `backend="auto"` selects the cuBLAS path for the tested six-template,
 61-sample geometry on Windows/CUDA and uses unmodified Kilosort otherwise.
 `backend="standard"` always runs Kilosort unchanged. Explicit options are
-`deep_tiled` and `cublas`. For a single named read-only INT16 binary, the fast
+`deep_tiled` and `cublas`. For named read-only INT16 binaries, the fast
 reader transfers INT16 to the GPU and converts to calibrated FP32 there;
 sorting arithmetic remains FP32. Pass `fast_int16=False` to use Kilosort's
 reader. Other Kilosort arguments are forwarded unchanged.
@@ -134,6 +135,29 @@ CLI example (the settings file must include `n_chan_bin`):
 ```powershell
 .\.venv\Scripts\terasort.exe sort --settings settings.json --probe-json probe.json --filename F:\data\recording.bin --results-dir F:\data\sorting_result
 ```
+
+To sort multiple segments together, repeat `--filename` in acquisition order:
+
+```powershell
+.\.venv\Scripts\terasort.exe sort --settings settings.json --probe-json probe.json --filename F:\data\segment_0001\neuropixels_ap.dat --filename F:\data\segment_0002\neuropixels_ap.dat --results-dir F:\data\session_sort
+```
+
+The Python API likewise accepts `filename=[path1, path2, ...]`. Kilosort
+learns one set of units and produces one normal Phy output. Raw files are read
+in place; TeraSort does not create a combined binary. All files must have the
+same INT16 channel layout and sample rate specified by the settings. The
+result's `session_sources.json` records each path, byte count, sample count,
+and half-open virtual sample range. `spike_times.npy` uses this virtual sample
+axis: for a spike at virtual sample `t`, locate the source whose start ≤ `t`
+< stop and subtract its start to get the file-local sample. Python users can
+call `terasort.session.locate_spikes(spike_times, manifest)`.
+
+The virtual boundary is only for Kilosort's shared sort. Recording gaps have
+unknown duration unless separately measured; no gap samples or timestamps are
+invented. Kilosort may process a batch across a file boundary, so inspect or
+exclude spikes near those boundaries. The sidecar preserves this limitation
+rather than implying a continuous acquisition. Session LFP export is not yet
+available from `sort --lfp-output`; export LFP from each source separately.
 
 Probe names must be valid Kilosort bundled names. A JSON probe dictionary can
 be passed with `--probe-json`. `terasort sort --help` lists all options. The

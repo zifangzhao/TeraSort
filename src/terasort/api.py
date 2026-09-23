@@ -46,7 +46,7 @@ def _select_backend(backend, device, settings):
 def _use_int16_reader(filename, file_object, data_dtype, backend, fast_int16):
     if not fast_int16 or backend == "standard" or file_object is not None:
         return False
-    if filename is None or isinstance(filename, (list, tuple)):
+    if filename is None or (isinstance(filename, (list, tuple)) and not filename):
         return False
     return np.dtype("int16" if data_dtype is None else data_dtype) == np.dtype("int16")
 
@@ -66,7 +66,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     available and otherwise uses unmodified Kilosort. ``backend='standard'``
     always calls unmodified Kilosort. ``deep_tiled`` uses the portable CuPy CUDA
     kernels, while ``cublas`` requires the included Windows x64 native bridge.
-    The INT16 reader applies only to a single named read-only INT16 binary.
+    The INT16 reader supports named read-only INT16 binaries, including ordered
+    Kilosort multi-file sessions.
     ``skip_drift_correction=True`` sets Kilosort's ``nblocks=0`` for this run
     without changing the caller's settings dictionary. This skips drift
     estimation and its extra detection pass; use it only when appropriate for
@@ -76,6 +77,15 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     It reads the raw file separately and may still contend for CPU or disk.
     """
     import kilosort
+    from .session import prepare_session, write_session_manifest
+
+    if isinstance(filename, tuple):
+        filename = list(filename)
+    session = None
+    if isinstance(filename, list) and len(filename) > 1:
+        if results_dir is None:
+            raise ValueError("A multi-file session requires results_dir for its source map")
+        session = prepare_session(filename, settings or {}, "int16" if data_dtype is None else data_dtype)
 
     run_settings = ({**(settings or {}), "nblocks": 0}
                     if skip_drift_correction else settings)
@@ -99,7 +109,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             stack.enter_context(parallel_lfp(filename, lfp_output, run_settings or {},
                                              passband_hz=lfp_passband_hz,
                                              workers=lfp_workers))
-        return kilosort.run_kilosort(
+        result = kilosort.run_kilosort(
             run_settings, probe=probe, probe_name=probe_name, filename=filename,
             data_dir=data_dir, file_object=file_object, results_dir=results_dir,
             data_dtype=data_dtype, do_CAR=do_CAR, invert_sign=invert_sign,
@@ -109,3 +119,6 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             bad_channels=bad_channels, shank_idx=shank_idx,
             verbose_console=verbose_console, verbose_log=verbose_log,
             torch_thread_lim=torch_thread_lim)
+        if session is not None:
+            write_session_manifest(results_dir, session)
+        return result

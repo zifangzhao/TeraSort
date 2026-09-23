@@ -2,6 +2,27 @@ import numpy as np
 import pytest
 
 
+def test_grouped_reader_opens_only_overlapping_files(tmp_path, monkeypatch):
+    from kilosort.io import BinaryRWFile
+    from terasort.kilosort_int16 import source_slice
+    files = [tmp_path / f"part{i}.bin" for i in range(5)]
+    for i, path in enumerate(files):
+        np.full((10, 2), i, dtype=np.int16).tofile(path)
+    reader = BinaryRWFile(files, 2, device="cpu")
+    group = reader.file
+    opened = []
+    original = group.get_file
+
+    def tracked(index):
+        opened.append(index)
+        return original(index)
+
+    monkeypatch.setattr(group, "get_file", tracked)
+    np.testing.assert_array_equal(source_slice(reader, 28, 32),
+                                  np.array([[2, 2], [2, 2], [3, 3], [3, 3]], dtype=np.int16))
+    assert opened == [2, 3]
+
+
 @pytest.fixture(scope='module')
 def backend():
     torch = pytest.importorskip('torch')
@@ -76,3 +97,23 @@ def test_context_scope_restoration_and_guards(backend, tmp_path):
                 raw.padded_batch_to_torch(0)
             raise RuntimeError('interrupt')
     assert BinaryRWFile.padded_batch_to_torch is original
+
+
+def test_multifile_reader_matches_reference_across_boundary(backend, tmp_path):
+    torch, _ = backend
+    from kilosort.io import BinaryRWFile
+    from terasort.kilosort_int16 import native_int16_reader
+    counts = np.random.default_rng(37).integers(-1000, 1000, (421, 3), dtype=np.int16)
+    files = [tmp_path / "part1.bin", tmp_path / "part2.bin"]
+    counts[:195].tofile(files[0])
+    counts[195:].tofile(files[1])
+    kwargs = dict(n_chan_bin=3, NT=128, nt=7, device=torch.device('cuda'))
+    grouped = BinaryRWFile(files, **kwargs)
+    reference = BinaryRWFile(files[0], file_object=counts, **kwargs)
+    with native_int16_reader(files) as reader:
+        for batch in range(grouped.n_batches):
+            actual, ai = grouped.padded_batch_to_torch(batch, return_inds=True)
+            expected, ei = reference.padded_batch_to_torch(batch, return_inds=True)
+            assert ai == ei
+            torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        assert reader.calls == grouped.n_batches

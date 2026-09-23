@@ -36,6 +36,24 @@ def test_validation_protects_input_and_result(tmp_path):
         validate_request(request)
 
 
+def test_validation_accepts_ordered_session(tmp_path):
+    request = _request(tmp_path)
+    second = tmp_path / "second.bin"
+    second.write_bytes(b"\0" * 24)
+    request.pop("filename")
+    request["filenames"] = [str(tmp_path / "recording.bin"), str(second)]
+    validated = validate_request(request)
+    assert validated["filenames"] == request["filenames"]
+    assert validated["filename"] == request["filenames"][0]
+    request["filenames"].append(str(second))
+    with pytest.raises(ValueError, match="more than once"):
+        validate_request(request)
+    request["filenames"].pop()
+    request["lfp_output"] = str(tmp_path / "lfp.i16")
+    with pytest.raises(ValueError, match="one source"):
+        validate_request(request)
+
+
 def test_browse_and_stage_eta(tmp_path):
     _request(tmp_path)
     listing = browse(str(tmp_path))
