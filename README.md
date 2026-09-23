@@ -159,6 +159,30 @@ exclude spikes near those boundaries. The sidecar preserves this limitation
 rather than implying a continuous acquisition. Session LFP export is not yet
 available from `sort --lfp-output`; export LFP from each source separately.
 
+### Optional local staging for network recordings
+
+For a recording on a slower SMB/NAS share, add `--stage-dir` with a **new local
+directory**. TeraSort makes one sequential, read-only-source copy before the
+sort, then reuses the local INT16 file for Kilosort's repeated passes:
+
+```powershell
+.\.venv\Scripts\terasort.exe sort --settings settings.json --probe-json probe.json --filename '\\server\share\recording\amplifier.dat' --results-dir C:\results\run01 --stage-dir C:\scratch\run01_input
+```
+
+The dashboard exposes the same optional field. TeraSort refuses an existing
+staging directory, checks free scratch space before copying, writes each file
+through a `.partial` name, checks source size/mtime, and verifies a SHA-256
+checksum against the local copy. It records the original and staged paths in `input_staging.json` next to
+the Phy output and in `staging_manifest.json` inside the scratch directory.
+Scratch copies are deliberately retained after sorting; remove them yourself
+when the run is verified. For multiple inputs, each is staged in the original
+order, and `session_sources.json` still maps spikes to the **original** files.
+
+Staging is optional because it consumes local disk equal to the entire input
+and adds an initial copy. It is useful only when repeated remote reads cost
+more than that copy. It is not a bounded-storage solution for a hundred-TB
+session; the whole-recording Kilosort limits below still apply.
+
 Probe names must be valid Kilosort bundled names. A JSON probe dictionary can
 be passed with `--probe-json`. `terasort sort --help` lists all options. The
 `scale` setting is the recording's calibrated microvolts per INT16 count; use

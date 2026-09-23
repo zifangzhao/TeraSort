@@ -87,6 +87,84 @@ def test_cli_passes_ordered_files(monkeypatch, tmp_path):
     assert calls[-1]["filename"] == files
 
 
+def test_cli_passes_staging_directory(monkeypatch, tmp_path):
+    import terasort.cli as cli
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"n_chan_bin": 2, "fs": 20000}')
+    calls = []
+    monkeypatch.setattr(cli, "run_kilosort", lambda *args, **kwargs: calls.append(kwargs))
+    stage = tmp_path / "new_stage"
+    cli.main(["sort", "--settings", str(settings), "--filename", str(tmp_path / "raw.bin"),
+              "--results-dir", str(tmp_path / "result"), "--stage-dir", str(stage)])
+    assert calls[-1]["stage_dir"] == stage
+
+
+def test_api_stages_source_before_sort_and_records_origin(monkeypatch, tmp_path):
+    import json
+    import numpy as np
+    source = tmp_path / "source"
+    source.mkdir()
+    raw = source / "recording.bin"
+    np.zeros((100, 2), dtype=np.int16).tofile(raw)
+    output = tmp_path / "result"
+    scratch = tmp_path / "scratch"
+
+    def fake_sort(*args, **kwargs):
+        output.mkdir()
+        staged = kwargs["filename"]
+        assert staged.parent == scratch
+        assert staged.read_bytes() == raw.read_bytes()
+        return ("sorted",)
+
+    monkeypatch.setattr(kilosort, "run_kilosort", fake_sort)
+    assert run_kilosort({"n_chan_bin": 2, "fs": 20000}, filename=raw,
+                        results_dir=output, backend="standard", stage_dir=scratch) == ("sorted",)
+    record = json.loads((output / "input_staging.json").read_text())
+    assert record["sources"][0]["source"] == str(raw)
+    assert raw.is_file()
+
+
+def test_api_refuses_existing_results_before_copy(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    raw = source / "recording.bin"
+    raw.write_bytes(b"\0" * 8)
+    output = tmp_path / "result"
+    output.mkdir()
+    (output / "keep.txt").write_text("existing")
+    scratch = tmp_path / "scratch"
+    with pytest.raises(FileExistsError, match="results directory"):
+        run_kilosort({"n_chan_bin": 2, "fs": 20000}, filename=raw,
+                     results_dir=output, backend="standard", stage_dir=scratch)
+    assert not scratch.exists()
+    assert (output / "keep.txt").read_text() == "existing"
+
+
+def test_staged_multifile_session_maps_to_original_sources(monkeypatch, tmp_path):
+    import json
+    import numpy as np
+    source = tmp_path / "sources"
+    source.mkdir()
+    files = [source / "first.bin", source / "second.bin"]
+    for file in files:
+        np.zeros((100, 2), dtype=np.int16).tofile(file)
+    output = tmp_path / "result"
+    scratch = tmp_path / "scratch"
+
+    def fake_sort(*args, **kwargs):
+        output.mkdir()
+        assert [p.parent for p in kwargs["filename"]] == [scratch, scratch]
+        return ("sorted",)
+
+    monkeypatch.setattr(kilosort, "run_kilosort", fake_sort)
+    run_kilosort({"n_chan_bin": 2, "fs": 20000}, filename=files,
+                 results_dir=output, backend="standard", stage_dir=scratch)
+    session = json.loads((output / "session_sources.json").read_text())
+    staging = json.loads((output / "input_staging.json").read_text())
+    assert [s["path"] for s in session["sources"]] == [str(p) for p in files]
+    assert [s["source"] for s in staging["sources"]] == [str(p) for p in files]
+
+
 def test_api_writes_source_map_after_multifile_sort(monkeypatch, tmp_path):
     import json
     import numpy as np

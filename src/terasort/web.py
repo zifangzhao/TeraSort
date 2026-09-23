@@ -54,7 +54,7 @@ def _job_log(job: dict, state_dir: Path) -> str:
     return kilosort_log + ("\n--- Worker output ---\n" + worker_log if worker_log else "")
 
 
-def _progress(log: str, elapsed: float, status: str) -> dict:
+def _progress(log: str, elapsed: float, status: str, staged: bool = False) -> dict:
     if status == "completed":
         return {"stage": "Completed", "percent": 100, "eta_seconds": 0}
     if status == "failed":
@@ -68,15 +68,24 @@ def _progress(log: str, elapsed: float, status: str) -> dict:
         if marker.lower() in log.lower():
             last = index
     if last < 0:
+        if staged:
+            values = re.findall(r"TERASORT_STAGING (\d{1,3})", log)
+            if values:
+                fraction = min(100, int(values[-1]))
+                eta = round(elapsed * (100 - fraction) / fraction) if 0 < fraction < 100 else None
+                return {"stage": "Staging input" if fraction < 100 else "Initializing sorter",
+                        "percent": round(fraction / 10), "eta_seconds": eta}
         return {"stage": "Starting", "percent": 0, "eta_seconds": None}
     completed_weight = sum(stage[2] for stage in STAGES[:last])
-    percent = round(100 * completed_weight / TOTAL_WEIGHT)
+    percent = round((10 if staged else 0) + (90 if staged else 100) * completed_weight / TOTAL_WEIGHT)
     # A stage boundary is the only trustworthy progress signal in Kilosort's log.
     # Delay ETA until detection begins to avoid extrapolating from fast startup.
     eta = None
     if last >= 2 and completed_weight:
         remaining = TOTAL_WEIGHT - completed_weight
-        eta = max(0, round(elapsed * remaining / completed_weight))
+        staging_seconds = re.findall(r"TERASORT_STAGING_SECONDS ([0-9.]+)", log)
+        compute_elapsed = max(0, elapsed - float(staging_seconds[-1])) if staged and staging_seconds else elapsed
+        eta = max(0, round(compute_elapsed * remaining / completed_weight))
     return {"stage": STAGES[last][0], "percent": percent, "eta_seconds": eta}
 
 
@@ -166,6 +175,19 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     if existing_outputs and os.path.normcase(str(output_path)) in {os.path.normcase(p) for p in existing_outputs}:
         raise ValueError("Another job already uses this results directory")
     request["results_dir"] = str(output_path)
+    if data.get("stage_dir"):
+        if not isinstance(data["stage_dir"], str):
+            raise ValueError("stage_dir must be a path")
+        stage_path = Path(data["stage_dir"]).expanduser().resolve()
+        if stage_path.exists():
+            raise ValueError("Staging directory must be new")
+        if existing_outputs and os.path.normcase(str(stage_path)) in {os.path.normcase(p) for p in existing_outputs}:
+            raise ValueError("Another job already uses this staging directory")
+        if stage_path.is_relative_to(output_path) or output_path.is_relative_to(stage_path):
+            raise ValueError("Staging and results directories must be separate")
+        if any(stage_path.is_relative_to(Path(path).parent) for path in paths):
+            raise ValueError("Staging directory must be outside input folders")
+        request["stage_dir"] = str(stage_path)
     probe_json = data.get("probe_json")
     probe_name = data.get("probe_name")
     if bool(probe_json) == bool(probe_name):
@@ -255,6 +277,9 @@ class JobManager:
         with self.lock:
             outputs = {os.path.normcase(job["request"]["results_dir"]) for job in self.jobs.values()
                        if job["status"] in ("queued", "running")}
+            outputs.update(os.path.normcase(job["request"]["stage_dir"])
+                           for job in self.jobs.values()
+                           if job["status"] in ("queued", "running") and job["request"].get("stage_dir"))
             request = validate_request(data, outputs)
             job_id = uuid.uuid4().hex[:12]
             directory = self._job_dir(job_id)
@@ -291,7 +316,7 @@ class JobManager:
             job = dict(self.jobs[job_id])
             log = _job_log(job, self.state_dir)
             elapsed = (job.get("finished_at") or time.time()) - (job.get("started_at") or time.time())
-            job.update(_progress(log, elapsed, job["status"]))
+            job.update(_progress(log, elapsed, job["status"], bool(job["request"].get("stage_dir"))))
             job["created_at"] = _iso(job["created_at"])
             job["started_at"] = _iso(job.get("started_at"))
             job["finished_at"] = _iso(job.get("finished_at"))

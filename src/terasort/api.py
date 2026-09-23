@@ -59,7 +59,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  verbose_console=False, verbose_log=False, torch_thread_lim=None,
                  *, backend="auto", fast_int16=True,
                  skip_drift_correction=False, lfp_output=None,
-                 lfp_passband_hz=500.0, lfp_workers=8):
+                 lfp_passband_hz=500.0, lfp_workers=8,
+                 stage_dir=None):
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is
@@ -75,6 +76,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     ``lfp_output`` starts an optional lower-priority CPU LFP export after both
     spike-detection stages, during final clustering, then waits before returning.
     It reads the raw file separately and may still contend for CPU or disk.
+    ``stage_dir`` copies all named sources once to a new local scratch directory
+    before sorting. The copies remain there after the run.
     """
     import kilosort
     from .session import prepare_session, write_session_manifest
@@ -90,6 +93,33 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     run_settings = ({**(settings or {}), "nblocks": 0}
                     if skip_drift_correction else settings)
     selected = _select_backend(backend, device, run_settings or {})
+
+    staging = None
+    if stage_dir is not None:
+        if filename is None or file_object is not None or results_dir is None:
+            raise ValueError("Local staging requires named files and results_dir")
+        if lfp_output is not None and isinstance(filename, list):
+            raise ValueError("Parallel LFP with staging requires one source file")
+        channels = (settings or {}).get("n_chan_bin")
+        if type(channels) is not int or channels <= 0:
+            raise ValueError("Local staging requires positive integer n_chan_bin")
+        frame_bytes = channels * np.dtype("int16" if data_dtype is None else data_dtype).itemsize
+        files = filename if isinstance(filename, list) else [filename]
+        if any(Path(path).stat().st_size % frame_bytes for path in files):
+            raise ValueError("Source size is not divisible by the configured channel frame")
+        scratch = Path(stage_dir).expanduser().resolve()
+        result_path = Path(results_dir).expanduser().resolve()
+        if scratch.is_relative_to(result_path) or result_path.is_relative_to(scratch):
+            raise ValueError("Staging directory and results directory must be separate")
+        if result_path.exists() and (not result_path.is_dir() or any(result_path.iterdir())):
+            raise FileExistsError("Staged sorting requires a new or empty results directory")
+        from .staging import stage_inputs
+
+        staged, staging = stage_inputs(
+            files, scratch, progress=lambda percent: print(f"TERASORT_STAGING {percent}", flush=True))
+        print(f"TERASORT_STAGING_SECONDS {staging['total_seconds']}", flush=True)
+        filename = staged if len(staged) > 1 else staged[0]
+
     with ExitStack() as stack:
         if selected == "cublas":
             from .kilosort_cublas import cublas_kilosort
@@ -121,4 +151,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             torch_thread_lim=torch_thread_lim)
         if session is not None:
             write_session_manifest(results_dir, session)
+        if staging is not None:
+            from .staging import write_staging_record
+
+            write_staging_record(results_dir, staging)
         return result

@@ -25,6 +25,8 @@ def main() -> int:
             args.append(flag)
     if request.get("lfp_output"):
         args += ["--lfp-output", request["lfp_output"]]
+    if request.get("stage_dir"):
+        args += ["--stage-dir", request["stage_dir"]]
     code = 1
     try:
         print("TeraSort worker started; initializing Kilosort and CUDA...", flush=True)

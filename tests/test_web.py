@@ -54,6 +54,21 @@ def test_validation_accepts_ordered_session(tmp_path):
         validate_request(request)
 
 
+def test_validation_requires_new_separate_staging_directory(tmp_path):
+    request = _request(tmp_path)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "recording.bin").write_bytes((tmp_path / "recording.bin").read_bytes())
+    request["filename"] = str(source / "recording.bin")
+    request["stage_dir"] = str(tmp_path / "scratch")
+    assert validate_request(request)["stage_dir"] == request["stage_dir"]
+    with pytest.raises(ValueError, match="staging directory"):
+        validate_request(request, {request["stage_dir"]})
+    (tmp_path / "scratch").mkdir()
+    with pytest.raises(ValueError, match="must be new"):
+        validate_request(request)
+
+
 def test_browse_and_stage_eta(tmp_path):
     _request(tmp_path)
     listing = browse(str(tmp_path))
@@ -64,6 +79,10 @@ def test_browse_and_stage_eta(tmp_path):
     assert progress["stage"] == "Template detection"
     assert progress["percent"] == 21
     assert progress["eta_seconds"] > 0
+    staging = _progress("TERASORT_STAGING 50", 40, "running", staged=True)
+    assert staging == {"stage": "Staging input", "percent": 5, "eta_seconds": 40}
+    assert _progress("TERASORT_STAGING 100\nComputing drift correction", 100,
+                     "running", staged=True)["percent"] >= 10
     result = tmp_path / "result"
     result.mkdir()
     (result / "kilosort4.log").write_text("Computing drift correction")
