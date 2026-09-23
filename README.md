@@ -58,6 +58,45 @@ CuPy; other `.cu` kernels compile on first use.
 Installation does not download a recording. Other platforms have not been
 validated in this package; the included Windows DLL does not run elsewhere.
 
+## Browser dashboard
+
+Launch the local web service after installation:
+
+```powershell
+.\.venv\Scripts\terasort.exe web
+```
+
+It opens `http://127.0.0.1:8765/`. Select a raw binary, settings JSON, probe
+JSON (or bundled probe name), and a new results directory. The browser lists
+files on the recording machine; it never uploads the raw data. Jobs run one at
+a time to avoid GPU contention. The queue and logs persist in
+`%USERPROFILE%\.terasort\web` by default, or a directory supplied with
+`--state-dir`. Keep the service running to launch queued jobs. An active worker
+continues if the browser closes; the dashboard can reconnect after a server
+restart.
+
+The run view shows Kilosort's current stage, elapsed time, a rough stage-based
+ETA, worker RAM, system CPU/RAM, and device-wide NVIDIA GPU utilization and
+memory. Stage progress advances at Kilosort log boundaries, so it may pause
+for a long clustering stage. `nvidia-smi` must be available for GPU readings.
+The current sorter still has whole-recording Kilosort memory limits described
+under “Scale and evidence” below; this dashboard does not make a hundred-TB
+sort bounded.
+
+The service listens only on localhost by default. To access it from another
+computer, supply a bearer token and bind to a network interface (use a trusted
+network or tunnel; HTTP itself is unencrypted):
+
+```powershell
+$env:TERASORT_WEB_TOKEN = '<long-random-token>'
+.\.venv\Scripts\terasort.exe web --host 0.0.0.0 --no-browser
+```
+
+The page prompts for the token, which is held in browser session storage. You
+can inspect the service with `GET /api/jobs`, `GET /api/jobs/<id>`, and
+`GET /api/browse?path=...`; `POST /api/jobs` accepts the same form fields as
+JSON, and `POST /api/jobs/<id>/cancel` stops a queued or running job.
+
 ## Sort
 
 Change one import in an existing Kilosort script:

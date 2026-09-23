@@ -13,6 +13,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="terasort", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("backends", help="List available sorting backends")
+    web = sub.add_parser("web", help="Run the local browser dashboard and job queue")
+    web.add_argument("--host", default="127.0.0.1", help="Bind address (default: localhost)")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--state-dir", type=Path, help="Persistent job state directory")
+    web.add_argument("--token", help="Bearer token required when binding beyond localhost")
+    web.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
     lfp = sub.add_parser("lfp", help="Stream anti-aliased INT16 voltage to an LFP binary")
     lfp.add_argument("--filename", type=Path, required=True, help="Time-major interleaved INT16 input")
     lfp.add_argument("--output", type=Path, required=True, help="Time-major interleaved INT16 LFP output")
@@ -49,6 +55,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "backends":
         print("\n".join(available_backends()))
+        return 0
+    if args.command == "web":
+        from .web import serve
+        import os
+        serve(host=args.host, port=args.port, state_dir=args.state_dir,
+              token=args.token or os.environ.get("TERASORT_WEB_TOKEN"),
+              open_browser=not args.no_browser)
         return 0
     if args.command == "lfp":
         from .lfp import export_lfp

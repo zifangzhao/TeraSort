@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terasort-neural"
-version = "0.2.2"
+version = "0.3.0"
 description = "Kilosort 4.1.7-compatible CUDA sorting adapters and spike candidate bank"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ dependencies = [
   "nvidia-cuda-nvrtc-cu12==12.9.86",
   "h5py>=3,<4",
   "scipy>=1.14,<2",
+  "psutil>=7,<8",
 ]
 
 [project.optional-dependencies]
@@ -29,5 +30,5 @@ terasort-candidates = "terasort.candidates.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-terasort = ["*.cu", "*.cpp", "_native/*.dll"]
+terasort = ["*.cu", "*.cpp", "_native/*.dll", "webui/*.html"]
 "terasort.candidates" = ["*.cu"]
