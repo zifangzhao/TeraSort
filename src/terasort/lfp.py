@@ -1,6 +1,8 @@
 """Bounded-memory, resumable INT16 LFP export from interleaved INT16 voltage."""
 
 from fractions import Fraction
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import hashlib
 import json
 import math
@@ -74,7 +76,8 @@ def _filter(sample_rate_hz, output_rate_hz, passband_hz):
 
 def export_lfp(filename, output, *, sample_rate_hz, n_channels,
                output_rate_hz=1250, passband_hz=500.0,
-               scale_uv_per_count=None, chunk_seconds=5.0, resume=False):
+               scale_uv_per_count=None, chunk_seconds=5.0, workers=8,
+               resume=False):
     """Write time-major INT16 LFP and a JSON sidecar using bounded RAM.
 
     The filter is a Kaiser-window FIR designed for nominal 60 dB stopband
@@ -88,6 +91,8 @@ def export_lfp(filename, output, *, sample_rate_hz, n_channels,
         raise ValueError("Source must exist and differ from output")
     if not isinstance(n_channels, int) or n_channels < 1:
         raise ValueError("n_channels must be a positive integer")
+    if not isinstance(workers, int) or workers < 1:
+        raise ValueError("workers must be a positive integer")
     if not math.isfinite(chunk_seconds) or chunk_seconds <= 0:
         raise ValueError("chunk_seconds must be positive and finite")
     if scale_uv_per_count is not None and (
@@ -148,14 +153,26 @@ def export_lfp(filename, output, *, sample_rate_hz, n_channels,
         start = completed_output = clipped = 0
         _write_json_atomic(progress_path, dict(config=config,
             completed_input_samples=0, completed_output_samples=0, clipped_values=0))
-    with source.open("rb") as input_stream, output_stream:
+    workers = min(workers, n_channels)
+    channel_spans = [(i * n_channels // workers, (i + 1) * n_channels // workers)
+                     for i in range(workers)]
+    worker_context = ThreadPoolExecutor(max_workers=workers) if workers > 1 else nullcontext()
+    with source.open("rb") as input_stream, output_stream, worker_context as pool:
         for core_start in range(start, source_samples, core_samples):
             core_stop = min(core_start + core_samples, source_samples)
             read_start = max(0, core_start - halo)
             read_stop = min(source_samples, core_stop + halo)
             raw = _read_frames(input_stream, read_start, read_stop - read_start, n_channels)
-            filtered = resample_poly(raw.astype(np.float32), up, down,
-                                     axis=0, window=kernel, padtype="constant")
+            values_f32 = raw.astype(np.float32)
+            if pool is None:
+                filtered = resample_poly(values_f32, up, down, axis=0,
+                                         window=kernel, padtype="constant")
+            else:
+                def filter_channels(span):
+                    left, right = span
+                    return resample_poly(values_f32[:, left:right], up, down,
+                                         axis=0, window=kernel, padtype="constant")
+                filtered = np.concatenate(list(pool.map(filter_channels, channel_spans)), axis=1)
             local_start = (core_start - read_start) * up // down
             local_stop = _ceil_div((core_stop - read_start) * up, down)
             values = np.rint(filtered[local_start:local_stop])
@@ -174,6 +191,7 @@ def export_lfp(filename, output, *, sample_rate_hz, n_channels,
     if partial.stat().st_size != output_samples * frame_bytes:
         raise RuntimeError("LFP output byte count differs from expected sample count")
     result = dict(config, clipped_values=clipped,
+                  filter_workers=workers,
                   output_bytes=partial.stat().st_size,
                   complete=True,
                   provenance="Source size/mtime and head/tail hashes; full source hash omitted to avoid another pass")

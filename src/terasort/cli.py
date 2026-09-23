@@ -22,6 +22,8 @@ def main(argv=None):
     lfp.add_argument("--passband-hz", type=float, default=500.0)
     lfp.add_argument("--scale-uv-per-count", type=float)
     lfp.add_argument("--chunk-seconds", type=float, default=5.0)
+    lfp.add_argument("--workers", type=int, default=8,
+                     help="CPU channel-filter workers (default 8)")
     lfp.add_argument("--resume", action="store_true", help="Continue a matching .partial export")
     sort = sub.add_parser("sort", help="Sort one binary recording with Kilosort-compatible output")
     sort.add_argument("--settings", type=Path, required=True,
@@ -40,6 +42,10 @@ def main(argv=None):
     sort.add_argument("--invert-sign", action="store_true")
     sort.add_argument("--no-car", action="store_true")
     sort.add_argument("--verbose", action="store_true")
+    sort.add_argument("--lfp-output", type=Path,
+                      help="Export 1250 Hz LFP during final clustering, then wait for completion")
+    sort.add_argument("--lfp-passband-hz", type=float, default=500.0)
+    sort.add_argument("--lfp-workers", type=int, default=8)
     args = parser.parse_args(argv)
     if args.command == "backends":
         print("\n".join(available_backends()))
@@ -50,7 +56,8 @@ def main(argv=None):
             sample_rate_hz=args.sample_rate, n_channels=args.n_channels,
             output_rate_hz=args.output_rate, passband_hz=args.passband_hz,
             scale_uv_per_count=args.scale_uv_per_count,
-            chunk_seconds=args.chunk_seconds, resume=args.resume)
+            chunk_seconds=args.chunk_seconds, workers=args.workers,
+            resume=args.resume)
         print(json.dumps(result, indent=2))
         return 0
     settings = json.loads(args.settings.read_text())
@@ -69,6 +76,9 @@ def main(argv=None):
                  data_dtype=args.data_dtype, backend=args.backend,
                  fast_int16=not args.no_fast_int16,
                  skip_drift_correction=args.skip_drift_correction,
+                 lfp_output=args.lfp_output,
+                 lfp_passband_hz=args.lfp_passband_hz,
+                 lfp_workers=args.lfp_workers,
                  invert_sign=args.invert_sign, do_CAR=not args.no_car,
                  verbose_console=args.verbose)
     return 0

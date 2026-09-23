@@ -83,15 +83,26 @@ the value for your acquisition, rather than the example value. The included
 ```
 
 The `tmax` field in this settings file limits the run to the first 60 seconds.
-Remove it to process the whole file. The
-candidate bank query tool is `terasort-candidates`; see
+Remove it to process the whole file. The candidate bank query tool is
+`terasort-candidates`; see
 [`docs/spike_candidate_bank.md`](docs/spike_candidate_bank.md) and
 [`docs/spike_candidate_waveforms.md`](docs/spike_candidate_waveforms.md).
 
+For a full-file sort, add `--lfp-output PATH` to run the 1,250 Hz LFP export
+on lower-priority CPU workers during final clustering, after both spike-detection
+stages. The command waits for both outputs. LFP always covers the complete
+input file, even when sorting uses `tmin` or `tmax`. This overlap can reduce
+total elapsed time, but the LFP worker still reads the raw file separately and
+may compete for CPU or disk bandwidth.
+
+On the 600-second sample, deferred LFP did not slow either spike-detection stage
+in a single comparison; final clustering took longer. See the
+[`full-run timing`](docs/evidence/lfp_parallel_600s.md).
+
 ## Optional 1,250 Hz LFP export
 
-Run this separately only when LFP is needed; sorting does not create or read
-the LFP file:
+Use this command for a standalone LFP export; sorting never reads the LFP
+file. The `sort --lfp-output` option above generates it during sorting:
 
 ```powershell
 .\.venv\Scripts\terasort.exe lfp --filename F:\sortingDevelopment\data\recording_int16_uv.bin --output F:\sortingDevelopment\data\recording_lfp_1250_lp500.i16 --sample-rate 32000 --n-channels 384 --scale-uv-per-count 0.05 --passband-hz 500
@@ -102,10 +113,11 @@ an anti-alias FIR, and writes time-major interleaved INT16 at exactly 1,250 Hz.
 The default flat LFP passband is 0–500 Hz, with nominal 60 dB attenuation
 beginning at the 625 Hz output Nyquist frequency. Use `--passband-hz 300` for a
 shorter, faster filter, or another cutoff below 625 Hz. The 500 Hz filter takes
-more CPU time because its transition band is narrower. A JSON sidecar records
-source identity, channel count, sample rates, filtering, scale and any
-saturated output values. Output has the same channel order and
-microvolts-per-count scale as the input. At 600 seconds
+more CPU time because its transition band is narrower. Channels are filtered
+in parallel on eight CPU workers by default; `--workers 1` limits CPU use.
+A JSON sidecar records source identity, channel count, sample rates,
+filtering, scale and any saturated output values. Output has the same channel
+order and microvolts-per-count scale as the input. At 600 seconds
 and 384 channels the LFP binary is 576,000,000 bytes, versus 14,745,600,000
 bytes for the 32 kHz source. No full source hash is computed because that would
 add another complete read. If interrupted, rerun the same command with

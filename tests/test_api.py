@@ -69,3 +69,37 @@ def test_cli_drift_switch(monkeypatch, tmp_path):
                      "--results-dir", str(tmp_path / "out"),
                      "--skip-drift-correction"]) == 0
     assert calls[-1]["skip_drift_correction"] is True
+
+
+def test_parallel_lfp_completes_with_sort(monkeypatch, tmp_path):
+    import importlib
+    import json
+    import numpy as np
+    import terasort.lfp_parallel as lfp_parallel
+
+    source = tmp_path / "recording.bin"
+    output = tmp_path / "lfp.i16"
+    np.random.default_rng(14).integers(-1000, 1000, (32000, 2),
+                                      dtype=np.int16).tofile(source)
+    module = importlib.import_module("kilosort.run_kilosort")
+    monkeypatch.setattr(lfp_parallel, "_validated_cluster_module", lambda: module)
+    monkeypatch.setattr(module, "cluster_spikes", lambda: "clustered")
+
+    def fake_sort(*args, **kwargs):
+        assert not output.exists()
+        assert not (tmp_path / "lfp.i16.log").exists()
+        assert module.cluster_spikes() == "clustered"
+        assert (tmp_path / "lfp.i16.log").exists()
+        return ("sorted",)
+
+    monkeypatch.setattr(kilosort, "run_kilosort", fake_sort)
+    result = run_kilosort({"n_chan_bin": 2, "fs": 32000, "scale": 0.05},
+                          filename=source, backend="standard", lfp_output=output,
+                          lfp_workers=2)
+    assert result == ("sorted",)
+    metadata = json.loads((tmp_path / "lfp.i16.json").read_text())
+    assert metadata["complete"] and metadata["passband_hz"] == 500.0
+    assert metadata["output_samples"] == 1250
+    assert metadata["filter_workers"] == 2
+    assert output.stat().st_size == 1250 * 2 * 2
+    assert not (tmp_path / "lfp.i16.log").exists()

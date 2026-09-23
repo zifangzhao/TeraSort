@@ -2,7 +2,7 @@
 
 from .api import run_kilosort
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = ["DEFAULT_SETTINGS", "run_kilosort"]
 

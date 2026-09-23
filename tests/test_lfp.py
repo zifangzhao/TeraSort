@@ -11,13 +11,15 @@ import terasort.lfp as lfp
 
 @pytest.mark.parametrize("sample_rate", [30000, 32000])
 @pytest.mark.parametrize("passband_hz", [300.0, 500.0])
-def test_chunked_lfp_matches_whole_recording(sample_rate, passband_hz, tmp_path):
+@pytest.mark.parametrize("workers", [1, 3])
+def test_chunked_lfp_matches_whole_recording(sample_rate, passband_hz, workers, tmp_path):
     raw = np.random.default_rng(11).integers(-12000, 12000, (10013, 3), dtype=np.int16)
     source, output = tmp_path / "raw.i16", tmp_path / "lfp.i16"
     raw.tofile(source)
     result = lfp.export_lfp(source, output, sample_rate_hz=sample_rate,
                             n_channels=3, scale_uv_per_count=0.05,
-                            passband_hz=passband_hz, chunk_seconds=0.012)
+                            passband_hz=passband_hz, chunk_seconds=0.012,
+                            workers=workers)
     up, down, kernel, _ = lfp._filter(sample_rate, 1250, passband_hz)
     reference = resample_poly(raw.astype(np.float32), up, down,
                               axis=0, window=kernel, padtype="constant")
@@ -26,6 +28,7 @@ def test_chunked_lfp_matches_whole_recording(sample_rate, passband_hz, tmp_path)
     np.testing.assert_array_equal(actual, expected)
     assert result["output_samples"] == len(expected)
     assert result["scale_uv_per_count"] == 0.05
+    assert result["filter_workers"] == workers
     assert json.loads((tmp_path / "lfp.i16.json").read_text())["complete"] is True
     assert not (tmp_path / "lfp.i16.partial").exists()
 

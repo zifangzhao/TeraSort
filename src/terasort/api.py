@@ -58,7 +58,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  save_preprocessed_copy=False, bad_channels=None, shank_idx=None,
                  verbose_console=False, verbose_log=False, torch_thread_lim=None,
                  *, backend="auto", fast_int16=True,
-                 skip_drift_correction=False):
+                 skip_drift_correction=False, lfp_output=None,
+                 lfp_passband_hz=500.0, lfp_workers=8):
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is
@@ -70,6 +71,9 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     without changing the caller's settings dictionary. This skips drift
     estimation and its extra detection pass; use it only when appropriate for
     the recording's motion.
+    ``lfp_output`` starts an optional lower-priority CPU LFP export after both
+    spike-detection stages, during final clustering, then waits before returning.
+    It reads the raw file separately and may still contend for CPU or disk.
     """
     import kilosort
 
@@ -86,6 +90,15 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         if _use_int16_reader(filename, file_object, data_dtype, selected, fast_int16):
             from .kilosort_int16 import native_int16_reader
             stack.enter_context(native_int16_reader(filename))
+        if lfp_output is not None:
+            if filename is None or isinstance(filename, (list, tuple)) or file_object is not None:
+                raise ValueError("Parallel LFP requires one named INT16 source file")
+            if np.dtype("int16" if data_dtype is None else data_dtype) != np.dtype("int16"):
+                raise ValueError("Parallel LFP requires INT16 source data")
+            from .lfp_parallel import parallel_lfp
+            stack.enter_context(parallel_lfp(filename, lfp_output, run_settings or {},
+                                             passband_hz=lfp_passband_hz,
+                                             workers=lfp_workers))
         return kilosort.run_kilosort(
             run_settings, probe=probe, probe_name=probe_name, filename=filename,
             data_dir=data_dir, file_object=file_object, results_dir=results_dir,
