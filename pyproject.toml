@@ -25,6 +25,8 @@ test = ["pytest>=8,<10"]
 [project.scripts]
 terasort = "terasort.cli:main"
 terasort-candidates = "terasort.candidates.cli:main"
+terasort-sample-candidates = "terasort.candidates.sampling:main"
+terasort-stream-sort = "terasort.streaming:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

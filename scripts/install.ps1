@@ -7,8 +7,14 @@ if ($Python) {
     $basePython = (Resolve-Path -LiteralPath $Python -ErrorAction Stop).Path
     $baseArgs = @()
 } else {
-    $basePython = 'py'
-    $baseArgs = @('-3.11')
+    $localRuntime = Join-Path $root '.runtime-python/cpython-3.11.16/python/python.exe'
+    if (Test-Path -LiteralPath $localRuntime) {
+        $basePython = $localRuntime
+        $baseArgs = @()
+    } else {
+        $basePython = 'py'
+        $baseArgs = @('-3.11')
+    }
 }
 try {
     & $basePython @baseArgs -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3,11) and sys.maxsize > 2**32 else 1)'

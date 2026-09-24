@@ -10,6 +10,15 @@ modified.
 
 ## Install on Windows with an NVIDIA GPU
 
+For double-click setup, run **`install_and_start.bat`** in this repository.
+It calls the existing installer, verifies CUDA, then starts the dashboard.
+On later visits, use **`start_server.bat`**; it opens an already running
+dashboard or starts a new local server. Keep the server console open while
+using it. Both batch files locate the repository relative to their own paths.
+They require the complete repository; copying only a batch file elsewhere
+does not install the source code or Python itself. A custom Python executable
+can be supplied as `install_and_start.bat "C:\path\to\python.exe"`.
+
 Use 64-bit Python 3.11, Git, an NVIDIA GPU and compatible driver, and an
 internet connection for Python packages. In PowerShell, clone the repository
 and run its installer:
@@ -24,7 +33,8 @@ If you already cloned TeraSort, run the last command from that directory and
 skip cloning. The installer creates `.venv` in the repository,
 installs CUDA PyTorch and TeraSort's pinned dependencies, then compiles a small
 CUDA detection kernel and lists the available sorting backends. It uses
-`py -3.11` by default. If
+an existing `.runtime-python/cpython-3.11.16/python/python.exe` when available,
+otherwise `py -3.11`. If
 `py -3.11 --version` cannot find Python 3.11, pass the path to a 64-bit Python
 3.11 executable:
 
@@ -59,6 +69,35 @@ Installation does not download a recording. Other platforms have not been
 validated in this package; the included Windows DLL does not run elsewhere.
 
 ## Browser dashboard
+
+The dashboard also accepts an existing Neuroscope `session.xml` or
+`amplifier.xml` instead of a settings JSON. Click **Read XML** to preview the
+sample rate, channel count, channel groups and excluded contacts. If exactly
+one matching binary is found next to the XML, its path fills automatically;
+otherwise select inputs explicitly in acquisition order.
+
+Leave the probe fields empty to generate `probe.json` automatically from XML.
+This follows the MATLAB wrapper's default **staggered** convention: alternating
+−20/+20 µm horizontal offsets, 20 µm vertical steps, and 200 µm between anatomical
+groups. XML supplies group/channel order; these dimensions are a layout
+assumption, not measurements stored in XML. Skipped contacts keep their original
+positions before exclusion, and channel numbers remain zero-based. Supply a
+custom probe JSON only for a different physical layout. Generated settings,
+probe JSON and layout provenance are saved alongside each queued job. A bundled
+probe name alone is not supported in XML mode.
+
+Gain is optional for sorting in ADC units; enter the verified microvolts per
+count for scaled output (for example, 0.195 for the tested Intan recording).
+XML-configured LFP export requires this gain. Legacy XML voltage-range and
+amplification fields are not silently converted into an ADC gain. The optional
+LFP route retains its existing 1250 Hz output and 500 Hz passband settings.
+
+This imports metadata for the existing dashboard's Kilosort-compatible sorting
+route. It does not run MATLAB, sleep-state scoring or behavioral analysis from
+`preprocessSession.m`, modify source XML, or physically concatenate raw files.
+Multiple selected files retain the existing ordered-source handling; LFP export
+currently supports one selected source per job. Apply one XML only to files
+known to share its acquisition configuration.
 
 Launch the local web service after installation:
 
@@ -237,14 +276,53 @@ add another complete read. If interrupted, rerun the same command with
 `--resume`; completed chunks are retained and the last partial chunk is
 discarded. LFP is derived from raw voltage, not Kilosort's high-pass signal.
 
+## Bounded candidate subsampling (experimental)
+
+`terasort-sample-candidates` scans only SCB event metadata in two bounded
+passes, then selects deterministic candidate row IDs across time, shank,
+depth and SNR strata. Pass `--probe-json` for a multishank probe and verify the
+coordinate axes recorded in the output manifest. A matching-budget uniform
+sample is saved for comparison. The returned inverse-inclusion weights correct
+for deliberate oversampling of sparse strata when estimating population
+statistics. For example:
+
+```powershell
+.\.venv\Scripts\terasort-sample-candidates.exe --bank F:\data\candidates.scb.h5 --probe-json probe.json --budget 30000 --seed 17 --time-bins 6 --depth-bin-um 160 --minimum-per-stratum 20 --output F:\data\calibration_sample
+```
+
+The command writes `stratified_row_indices.npy`,
+`stratified_inverse_inclusion_weight.npy`, `uniform_row_indices.npy`, stratum
+counts and quotas, and `manifest.json` into a new directory. It leaves the SCB
+bank unchanged. SCB may contain several channel detections of one spike; row
+IDs are candidates, not unique neuron events. This selects training examples
+only. The streaming assignment pass below consumes waveform banks separately;
+sampling must not discard detections in a dense pass.
+
+The experimental [bounded unit-matching API](docs/continuous_unit_matching.md)
+generates spatial candidate pairs and scores templates in fixed batches. It
+does not yet assign cross-day identities or reproduce UnitMatch probabilities.
+
+The [experimental streaming assignment pass](docs/streaming_sort.md) groups
+SCB 0.2 waveform candidates, compares them with at most 32 calibration
+templates per anchor contact, and updates clean, high-confidence templates
+after each bounded epoch. Run `terasort-stream-sort --bank bank.scb.h5
+--templates templates.npy --output new.assignments.h5 --backend cuda`
+for direct CUDA matching; `--backend cpu` is its reference. Calibration
+templates must share the SCB channel order and preprocessing frame. Unknown
+events remain unassigned, and the current pass is not a validated Kilosort
+replacement.
+
 ## Scale and evidence
 
-The current accelerated sorter remains a whole-recording Kilosort run. Tiled
+The production accelerated sorter remains a whole-recording Kilosort run. Tiled
 detection limits one large GPU intermediate, but Kilosort's global clustering,
 feature collection and output stages are **not yet bounded by recording length**.
-Do not treat this version as a validated hundred-terabyte sorter. The candidate
-bank is shard-oriented and can be written per segment; it is not yet a general
-multiday unit linker. See [`docs/bounded_sorting.md`](docs/bounded_sorting.md).
+The opt-in `session-sort` path has bounded source cores, calibration samples,
+waveform cache, and immutable restartable shards, but its sorting quality and
+CUDA resource bounds need the full benchmark gates. Do not treat either route
+as a validated hundred-terabyte sorter. See
+[`docs/session_sort.md`](docs/session_sort.md) and
+[`docs/bounded_sorting.md`](docs/bounded_sorting.md).
 
 On one 600 s, 384-channel public synthetic recording, the C++/cuBLAS INT16 run
 took 208.186 s against 214.379 s for the fresh `deep_tiled` INT16 control
@@ -257,7 +335,10 @@ general speed or accuracy guarantee. The retained
 
 ## Development and license
 
-Run `python -m pytest -q tests` in the installed environment. The source
+Install test dependencies with `.venv\Scripts\python.exe -m pip install -e ".[test]"`,
+then run `powershell -File scripts/test.ps1`. This uses a new project-local
+temporary directory, avoiding stale shared pytest directories on Windows.
+The source
 guards refuse to patch an unverified Kilosort implementation. TeraSort's
 adapters include transformations of Kilosort 4.1.7 GPL-3.0 code at runtime;
 this package is distributed under GPL-3.0-only. See `LICENSE` and the

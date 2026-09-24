@@ -148,14 +148,23 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         raise ValueError("The same input file was selected more than once")
     request["filename"] = paths[0]
     request["filenames"] = paths
-    value = data.get("settings")
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("settings is required")
-    settings_path = Path(value).expanduser().resolve(strict=True)
-    if not settings_path.is_file():
-        raise ValueError("settings must be a file")
-    request["settings"] = str(settings_path)
-    settings = json.loads(Path(request["settings"]).read_text(encoding="utf-8"))
+    if data.get("neuroscope_xml"):
+        from .neuroscope import read_xml
+        if data.get("settings"):
+            raise ValueError("Choose Neuroscope XML or settings JSON, not both")
+        metadata = read_xml(data["neuroscope_xml"], data.get("gain_uv_per_count"))
+        settings = metadata["settings"]
+        request["xml_import"] = metadata
+        request["_xml_settings"] = settings
+    else:
+        value = data.get("settings")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("settings or neuroscope_xml is required")
+        settings_path = Path(value).expanduser().resolve(strict=True)
+        if not settings_path.is_file():
+            raise ValueError("settings must be a file")
+        request["settings"] = str(settings_path)
+        settings = json.loads(Path(request["settings"]).read_text(encoding="utf-8"))
     if not isinstance(settings, dict) or type(settings.get("n_chan_bin")) is not int or settings["n_chan_bin"] <= 0:
         raise ValueError("Settings must contain a positive integer n_chan_bin")
     for path in paths:
@@ -190,7 +199,8 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         request["stage_dir"] = str(stage_path)
     probe_json = data.get("probe_json")
     probe_name = data.get("probe_name")
-    if bool(probe_json) == bool(probe_name):
+    auto_xml_probe = bool(request.get("xml_import")) and not probe_json and not probe_name
+    if not auto_xml_probe and bool(probe_json) == bool(probe_name):
         raise ValueError("Select exactly one probe JSON or bundled probe name")
     if probe_json:
         probe_path = Path(probe_json).expanduser().resolve(strict=True)
@@ -199,8 +209,19 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         request["probe_json"] = str(probe_path)
     elif isinstance(probe_name, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", probe_name):
         request["probe_name"] = probe_name
-    else:
+    elif not auto_xml_probe:
         raise ValueError("Invalid bundled probe name")
+    if request.get("xml_import"):
+        from .neuroscope import configure_probe, generate_probe
+        if auto_xml_probe:
+            request["_xml_probe"] = generate_probe(request["xml_import"])
+            request["xml_import"]["probe_layout"] = "staggered: MATLAB wrapper convention"
+        elif probe_json:
+            request["_xml_probe"] = configure_probe(request["xml_import"],
+                json.loads(Path(request["probe_json"]).read_text(encoding="utf-8")))
+            request["xml_import"]["probe_layout"] = "custom probe JSON"
+        else:
+            raise ValueError("Leave probe fields empty for automatic XML geometry, or supply a custom probe JSON")
     backend = data.get("backend", "auto")
     if backend not in ("auto", "standard", "deep_tiled", "cublas"):
         raise ValueError("Invalid backend")
@@ -208,6 +229,8 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     for key in ("skip_drift_correction", "no_fast_int16"):
         request[key] = bool(data.get(key, False))
     if data.get("lfp_output"):
+        if request.get("xml_import") and "scale" not in settings:
+            raise ValueError("Specify gain in microvolts per count for XML-configured LFP export")
         if len(paths) > 1:
             raise ValueError("Parallel LFP output currently supports one source file per run")
         lfp_path = Path(data["lfp_output"]).expanduser().resolve()
@@ -284,6 +307,14 @@ class JobManager:
             job_id = uuid.uuid4().hex[:12]
             directory = self._job_dir(job_id)
             directory.mkdir()
+            if "_xml_settings" in request:
+                for key, filename in (("settings", "settings.json"), ("probe_json", "probe.json")):
+                    source_key = "_xml_settings" if key == "settings" else "_xml_probe"
+                    target = directory / filename
+                    target.write_text(json.dumps(request.pop(source_key), indent=2), encoding="utf-8")
+                    request[key] = str(target)
+                (directory / "xml_import.json").write_text(
+                    json.dumps(request["xml_import"], indent=2), encoding="utf-8")
             job = {"id": job_id, "status": "queued", "created_at": time.time(),
                    "started_at": None, "finished_at": None, "request": request}
             self.jobs[job_id] = job
@@ -469,6 +500,12 @@ def create_handler(manager: JobManager, token: str | None = None):
                 elif split.path == "/api/browse":
                     query = parse_qs(split.query)
                     self._json(200, browse(query.get("path", [None])[0], query.get("kind", ["all"])[0]))
+                elif split.path == "/api/neuroscope":
+                    from .neuroscope import read_xml, generate_probe
+                    query = parse_qs(split.query)
+                    metadata = read_xml(query.get("path", [""])[0], query.get("gain", [None])[0])
+                    metadata["generated_probe"] = generate_probe(metadata)
+                    self._json(200, metadata)
                 elif split.path == "/api/jobs":
                     self._json(200, {"jobs": manager.list()})
                 elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}", split.path):
