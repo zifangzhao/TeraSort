@@ -155,7 +155,7 @@ class Int16Reader:
 
 
 @contextmanager
-def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=256, read_cache_slots=3):
+def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=4096, read_cache_slots=2):
     from kilosort import io
     if importlib.metadata.version('kilosort') != '4.1.7':
         raise RuntimeError('INT16 adapter validated only against Kilosort 4.1.7')

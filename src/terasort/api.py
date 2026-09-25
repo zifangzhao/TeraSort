@@ -60,7 +60,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  *, backend="auto", fast_int16=True,
                  skip_drift_correction=False, lfp_output=None,
                  lfp_passband_hz=500.0, lfp_workers=8,
-                 stage_dir=None, read_cache_dir=None, read_cache_mb=256, read_cache_slots=3):
+                 stage_dir=None, read_cache_dir=None, read_cache_mb=4096, read_cache_slots=2):
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is

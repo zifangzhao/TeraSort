@@ -201,11 +201,14 @@ available from `sort --lfp-output`; export LFP from each source separately.
 ### Bounded background reads for network recordings
 
 The fast INT16 Kilosort route can download sequential blocks to a local SSD
-while the GPU processes the current data. Enable **Local SSD read cache** in
-the dashboard, or add `--read-cache-dir F:\TeraSortReadCache` to `terasort sort`.
-The defaults, `--read-cache-mb 256 --read-cache-slots 3`, bound the cache payload
-to 768 MiB regardless of recording length. One background downloader reads in
-8 MiB pieces; large blocks stay on disk rather than occupying Python RAM.
+while the GPU processes the current data. The dashboard enables this for new
+runs by default at `F:\TeraSortReadCache`; change or clear that path to choose a
+different drive or disable it. For the CLI, add `--read-cache-dir
+F:\TeraSortReadCache` to `terasort sort`. The defaults,
+`--read-cache-mb 4096 --read-cache-slots 2`, use 4 GiB disk blocks with an
+8 GiB total disk budget, independent of recording length. One background
+downloader streams each block in 8 MiB pieces; the data stays on disk rather
+than occupying Python RAM.
 Sparse calibration reads fetch only their requested ranges to avoid downloading
 unused gaps. Inputs remain read-only, including across concatenated files.
 
@@ -216,7 +219,8 @@ unique `terasort-read-*` folder behind. This is temporary read-ahead, not a
 persistent restart cache. Network errors fail the read rather than silently
 returning incomplete data. Actual speed depends on the server, network, local
 SSD, and sorting stage; a real-network speed improvement has not yet been measured.
-The separate LFP process does not use this cache.
+The separate LFP process does not use this cache. The cache needs at least
+8 GiB plus 64 MiB free on its selected volume when a job starts.
 
 ### Optional local staging for network recordings
 

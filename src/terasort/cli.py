@@ -91,8 +91,8 @@ def main(argv=None):
                       default="auto")
     sort.add_argument("--no-fast-int16", action="store_true")
     sort.add_argument("--read-cache-dir", type=Path, help="Bounded SSD cache with background network read-ahead")
-    sort.add_argument("--read-cache-mb", type=int, default=256)
-    sort.add_argument("--read-cache-slots", type=int, default=3)
+    sort.add_argument("--read-cache-mb", type=int, default=4096)
+    sort.add_argument("--read-cache-slots", type=int, default=2)
     sort.add_argument("--stage-dir", type=Path,
                       help="New local scratch directory for one-time source copies (retained after sorting)")
     sort.add_argument("--skip-drift-correction", action="store_true",

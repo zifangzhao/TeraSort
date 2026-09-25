@@ -259,7 +259,7 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
             raise ValueError('Read cache must be outside source folders')
         if cache.is_relative_to(output_path) or output_path.is_relative_to(cache):
             raise ValueError('Read cache and results must be separate')
-        mb,slots = data.get("read_cache_mb",256),data.get("read_cache_slots",3)
+        mb,slots = data.get("read_cache_mb",4096),data.get("read_cache_slots",2)
         if type(mb) is not int or not 1<=mb<=4096 or type(slots) is not int or not 2<=slots<=16:
             raise ValueError('Read cache requires 1–4096 MiB blocks and 2–16 slots')
         request.update(read_cache_dir=str(cache),read_cache_mb=mb,read_cache_slots=slots)

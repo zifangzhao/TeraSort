@@ -77,8 +77,8 @@ def test_read_cache_validation(tmp_path):
     request['filename'] = str(source / 'recording.bin')
     request['read_cache_dir'] = str(tmp_path / 'cache')
     validated = validate_request(request)
-    assert validated['read_cache_mb'] == 256
-    assert validated['read_cache_slots'] == 3
+    assert validated['read_cache_mb'] == 4096
+    assert validated['read_cache_slots'] == 2
     request['read_cache_slots'] = 1
     with pytest.raises(ValueError, match='slots'):
         validate_request(request)
