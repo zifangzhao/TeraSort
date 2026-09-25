@@ -29,7 +29,15 @@ def source_slice(reader, start, stop, cache=None, sequential=False):
     source = reader.file
     if not hasattr(source, "split_indices") or source._filenames is None:
         if cache is not None:
-            payload = cache.read(reader.filename, start*reader.n_chan_bin*2,
+            filename = reader.filename
+            # Kilosort normalizes even a single named input to a one-item
+            # list on some reader paths. The non-group reader still maps one
+            # file, so pass its path (rather than the list) to the cache.
+            if isinstance(filename, (list, tuple)):
+                if len(filename) != 1:
+                    raise ValueError('Non-group Kilosort reader has multiple source filenames')
+                filename = filename[0]
+            payload = cache.read(filename, start*reader.n_chan_bin*2,
                                  stop*reader.n_chan_bin*2, sequential=sequential)
             return np.frombuffer(payload,dtype=np.int16).reshape(-1,reader.n_chan_bin)
         return source[start:stop]
