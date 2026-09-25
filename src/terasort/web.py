@@ -426,6 +426,76 @@ class JobManager:
             self._save(job)
             return self.view(job_id, include_log=False)
 
+    @staticmethod
+    def _retry_path(original: str, reserved: set[str], *, file_path: bool = False) -> str:
+        path = Path(original).expanduser().resolve()
+        for attempt in range(1, 10000):
+            suffix = "_retry" if attempt == 1 else f"_retry_{attempt:02d}"
+            if file_path:
+                candidate = path.with_name(f"{path.stem}{suffix}{path.suffix}")
+            else:
+                candidate = path.with_name(f"{path.name}{suffix}")
+            key = os.path.normcase(str(candidate.resolve()))
+            if key not in reserved and not candidate.exists():
+                return str(candidate)
+        raise ValueError("Could not find an unused retry output path")
+
+    def retry(self, job_id: str) -> dict:
+        with self.lock:
+            original = self.jobs[job_id]
+            if original["status"] not in ("failed", "cancelled"):
+                raise ValueError("Only failed or cancelled jobs can be retried")
+            if self._alive(original):
+                raise ValueError("The worker is still stopping; retry after it exits")
+            existing = next((job for job in self.jobs.values()
+                             if job.get("retry_of") == job_id and
+                             job["status"] in ("queued", "running")), None)
+            if existing is not None:
+                return self.view(existing["id"], include_log=False)
+
+            request = original["request"]
+            reserved = set()
+            for job in self.jobs.values():
+                for key in ("results_dir", "stage_dir", "lfp_output"):
+                    value = job["request"].get(key)
+                    if value:
+                        reserved.add(os.path.normcase(str(Path(value).expanduser().resolve())))
+
+            results_dir = self._retry_path(request["results_dir"], reserved)
+            payload = {"filenames": request.get("filenames", [request["filename"]]),
+                       "settings": request.get("settings"),
+                       "probe_json": request.get("probe_json"),
+                       "probe_name": request.get("probe_name"),
+                       "results_dir": results_dir,
+                       "backend": request.get("backend", "auto"),
+                       "skip_drift_correction": request.get("skip_drift_correction", False),
+                       "no_fast_int16": request.get("no_fast_int16", False)}
+            for key in ("read_cache_dir", "read_cache_mb", "read_cache_slots"):
+                if key in request:
+                    payload[key] = request[key]
+            if request.get("stage_dir"):
+                payload["stage_dir"] = self._retry_path(request["stage_dir"], reserved)
+            if request.get("lfp_output"):
+                old_output = Path(request["lfp_output"]).expanduser().resolve()
+                old_results = Path(request["results_dir"]).expanduser().resolve()
+                try:
+                    relative_output = old_output.relative_to(old_results)
+                except ValueError:
+                    payload["lfp_output"] = self._retry_path(
+                        str(old_output), reserved, file_path=True)
+                else:
+                    payload["lfp_output"] = str(Path(results_dir) / relative_output)
+
+            retried = self.add(payload)
+            job = self.jobs[retried["id"]]
+            job["retry_of"] = job_id
+            if request.get("xml_import"):
+                job["request"]["xml_import"] = request["xml_import"]
+                (self._job_dir(job["id"]) / "xml_import.json").write_text(
+                    json.dumps(request["xml_import"], indent=2), encoding="utf-8")
+            self._save(job)
+            return self.view(job["id"], include_log=False)
+
     def cancel(self, job_id: str) -> dict:
         with self.lock:
             job = self.jobs[job_id]
@@ -645,6 +715,8 @@ def create_handler(manager: JobManager, token: str | None = None):
                     self._json(201, manager.add(data))
                 elif self.path == "/api/settings":
                     self._json(200, manager.update_settings(data))
+                elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/retry", self.path):
+                    self._json(201, manager.retry(self.path.split("/")[3]))
                 elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/cancel", self.path):
                     self._json(200, manager.cancel(self.path.split("/")[3]))
                 else:

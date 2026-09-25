@@ -126,6 +126,11 @@ your hardware before queuing large sessions. The queue and logs persist in
 continues if the browser closes; the dashboard can reconnect after a server
 restart.
 
+Failed or cancelled runs can be retried from their detail panel. A retry keeps
+the input and sorter settings, then queues a new attempt with fresh result and
+staging paths so partial outputs are preserved. The service also accepts
+`POST /api/jobs/<id>/retry`.
+
 The run view shows Kilosort's current stage, elapsed time, a rough stage-based
 ETA, worker RAM, system CPU/RAM, and device-wide NVIDIA GPU utilization and
 memory. Stage progress advances at Kilosort log boundaries, so it may pause
