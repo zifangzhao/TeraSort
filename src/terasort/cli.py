@@ -90,6 +90,9 @@ def main(argv=None):
     sort.add_argument("--backend", choices=("auto", "standard", "deep_tiled", "cublas"),
                       default="auto")
     sort.add_argument("--no-fast-int16", action="store_true")
+    sort.add_argument("--read-cache-dir", type=Path, help="Bounded SSD cache with background network read-ahead")
+    sort.add_argument("--read-cache-mb", type=int, default=256)
+    sort.add_argument("--read-cache-slots", type=int, default=3)
     sort.add_argument("--stage-dir", type=Path,
                       help="New local scratch directory for one-time source copies (retained after sorting)")
     sort.add_argument("--skip-drift-correction", action="store_true",
@@ -170,6 +173,8 @@ def main(argv=None):
                  fast_int16=not args.no_fast_int16,
                  skip_drift_correction=args.skip_drift_correction,
                  stage_dir=args.stage_dir,
+                 read_cache_dir=args.read_cache_dir, read_cache_mb=args.read_cache_mb,
+                 read_cache_slots=args.read_cache_slots,
                  lfp_output=args.lfp_output,
                  lfp_passband_hz=args.lfp_passband_hz,
                  lfp_workers=args.lfp_workers,

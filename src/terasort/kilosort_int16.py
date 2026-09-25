@@ -24,23 +24,32 @@ def channel_calibration(value, channels, default):
     return np.ascontiguousarray(array)
 
 
-def source_slice(reader, start, stop):
+def source_slice(reader, start, stop, cache=None, sequential=False):
     """Read only the files overlapping a batch, even in a long file list."""
     source = reader.file
     if not hasattr(source, "split_indices") or source._filenames is None:
+        if cache is not None:
+            payload = cache.read(reader.filename, start*reader.n_chan_bin*2,
+                                 stop*reader.n_chan_bin*2, sequential=sequential)
+            return np.frombuffer(payload,dtype=np.int16).reshape(-1,reader.n_chan_bin)
         return source[start:stop]
     pieces = []
     while start < stop:
         index = bisect_right(source.split_indices, start)
         previous = 0 if index == 0 else source.split_indices[index - 1]
         end = min(stop, source.split_indices[index])
-        pieces.append(source.get_file(index)[start - previous:end - previous])
+        if cache is None:
+            pieces.append(source.get_file(index)[start - previous:end - previous])
+        else:
+            payload = cache.read(source._filenames[index], (start-previous)*reader.n_chan_bin*2,
+                                 (end-previous)*reader.n_chan_bin*2,sequential=sequential)
+            pieces.append(np.frombuffer(payload,dtype=np.int16).reshape(-1,reader.n_chan_bin))
         start = end
     return pieces[0] if len(pieces) == 1 else np.concatenate(pieces, axis=0)
 
 
 class Int16Reader:
-    def __init__(self):
+    def __init__(self, read_cache=None):
         import cupy as cp
         self.cp = cp
         self.module = cp.RawModule(code=Path(__file__).with_suffix('.cu').read_text(),
@@ -51,6 +60,7 @@ class Int16Reader:
         self.calls = self.transferred_bytes = self.buffers_created = 0
         self.host_read_copy_seconds = 0.
         self.max_pinned_buffer_bytes = 0
+        self.read_cache = read_cache
 
     def read(self, reader, ibatch, return_inds=False):
         import torch
@@ -84,7 +94,9 @@ class Int16Reader:
             # Covers callers switching CUDA streams between reads.
             stream.wait_event(state['decode_done'])
         begin = time.perf_counter()
-        raw = source_slice(reader, bstart, bend)
+        sequential = original_batch == state.get('previous_batch', -2)+1
+        raw = source_slice(reader, bstart, bend, self.read_cache, sequential)
+        state['previous_batch'] = original_batch
         nsamp = len(raw)
         left_pad = int(reader.nt) if original_batch == 0 else 0
         if nsamp <= 0 or nsamp+left_pad > output_samples:
@@ -136,10 +148,14 @@ class Int16Reader:
         for _, _, end in self.events:
             end.synchronize()
         self.states.clear()
+        if self.read_cache is not None:
+            import json
+            self.read_cache.close()
+            print('TERASORT_READ_CACHE ' + json.dumps(self.read_cache.stats()), flush=True)
 
 
 @contextmanager
-def native_int16_reader(filename):
+def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=256, read_cache_slots=3):
     from kilosort import io
     if importlib.metadata.version('kilosort') != '4.1.7':
         raise RuntimeError('INT16 adapter validated only against Kilosort 4.1.7')
@@ -148,7 +164,16 @@ def native_int16_reader(filename):
         raise RuntimeError('Kilosort reader changed; refusing unverified substitution')
     target = tuple(Path(name).resolve() for name in
                    (filename if isinstance(filename, (list, tuple)) else [filename]))
-    backend = Int16Reader()
+    cache = None
+    if read_cache_dir is not None:
+        from .read_cache import ReadAheadCache
+        cache = ReadAheadCache(read_cache_dir, block_mb=read_cache_mb, slots=read_cache_slots)
+    try:
+        backend = Int16Reader(cache)
+    except BaseException:
+        if cache is not None:
+            cache.close()
+        raise
 
     def replacement(reader, ibatch, return_inds=False):
         path = reader.filename

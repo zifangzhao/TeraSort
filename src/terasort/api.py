@@ -60,7 +60,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  *, backend="auto", fast_int16=True,
                  skip_drift_correction=False, lfp_output=None,
                  lfp_passband_hz=500.0, lfp_workers=8,
-                 stage_dir=None):
+                 stage_dir=None, read_cache_dir=None, read_cache_mb=256, read_cache_slots=3):
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is
@@ -93,6 +93,17 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     run_settings = ({**(settings or {}), "nblocks": 0}
                     if skip_drift_correction else settings)
     selected = _select_backend(backend, device, run_settings or {})
+    if read_cache_dir is not None:
+        if stage_dir is not None or not _use_int16_reader(filename,file_object,data_dtype,selected,fast_int16):
+            raise ValueError('Streaming read cache requires the fast CUDA INT16 reader and cannot combine with full staging')
+        cache_path = Path(read_cache_dir).expanduser().resolve()
+        sources = filename if isinstance(filename,(list,tuple)) else [filename]
+        if any(cache_path.is_relative_to(Path(p).resolve().parent) for p in sources):
+            raise ValueError('Read cache must be outside source folders')
+        if results_dir is not None:
+            result_path = Path(results_dir).expanduser().resolve()
+            if cache_path.is_relative_to(result_path) or result_path.is_relative_to(cache_path):
+                raise ValueError('Read cache and result directories must be separate')
 
     staging = None
     if stage_dir is not None:
@@ -129,7 +140,11 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
             stack.enter_context(tiled_kilosort(tile_samples=2048, deep=True))
         if _use_int16_reader(filename, file_object, data_dtype, selected, fast_int16):
             from .kilosort_int16 import native_int16_reader
-            stack.enter_context(native_int16_reader(filename))
+            if read_cache_dir is None:
+                stack.enter_context(native_int16_reader(filename))
+            else:
+                stack.enter_context(native_int16_reader(filename,read_cache_dir=read_cache_dir,
+                    read_cache_mb=read_cache_mb,read_cache_slots=read_cache_slots))
         if lfp_output is not None:
             if filename is None or isinstance(filename, (list, tuple)) or file_object is not None:
                 raise ValueError("Parallel LFP requires one named INT16 source file")

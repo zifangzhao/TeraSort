@@ -198,6 +198,26 @@ exclude spikes near those boundaries. The sidecar preserves this limitation
 rather than implying a continuous acquisition. Session LFP export is not yet
 available from `sort --lfp-output`; export LFP from each source separately.
 
+### Bounded background reads for network recordings
+
+The fast INT16 Kilosort route can download sequential blocks to a local SSD
+while the GPU processes the current data. Enable **Local SSD read cache** in
+the dashboard, or add `--read-cache-dir F:\TeraSortReadCache` to `terasort sort`.
+The defaults, `--read-cache-mb 256 --read-cache-slots 3`, bound the cache payload
+to 768 MiB regardless of recording length. One background downloader reads in
+8 MiB pieces; large blocks stay on disk rather than occupying Python RAM.
+Sparse calibration reads fetch only their requested ranges to avoid downloading
+unused gaps. Inputs remain read-only, including across concatenated files.
+
+This option requires the fast CUDA INT16 reader and cannot be combined with
+full staging. It applies to newly started jobs; it does not change a running
+worker. Cache files are removed on normal close; a killed process can leave its
+unique `terasort-read-*` folder behind. This is temporary read-ahead, not a
+persistent restart cache. Network errors fail the read rather than silently
+returning incomplete data. Actual speed depends on the server, network, local
+SSD, and sorting stage; a real-network speed improvement has not yet been measured.
+The separate LFP process does not use this cache.
+
 ### Optional local staging for network recordings
 
 For a recording on a slower SMB/NAS share, add `--stage-dir` with a **new local

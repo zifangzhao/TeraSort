@@ -99,7 +99,8 @@ def test_context_scope_restoration_and_guards(backend, tmp_path):
     assert BinaryRWFile.padded_batch_to_torch is original
 
 
-def test_multifile_reader_matches_reference_across_boundary(backend, tmp_path):
+@pytest.mark.parametrize('cache_enabled', [False, True])
+def test_multifile_reader_matches_reference_across_boundary(backend, tmp_path, cache_enabled):
     torch, _ = backend
     from kilosort.io import BinaryRWFile
     from terasort.kilosort_int16 import native_int16_reader
@@ -110,7 +111,9 @@ def test_multifile_reader_matches_reference_across_boundary(backend, tmp_path):
     kwargs = dict(n_chan_bin=3, NT=128, nt=7, device=torch.device('cuda'))
     grouped = BinaryRWFile(files, **kwargs)
     reference = BinaryRWFile(files[0], file_object=counts, **kwargs)
-    with native_int16_reader(files) as reader:
+    cache_options = dict(read_cache_dir=tmp_path / 'cache', read_cache_mb=1,
+                         read_cache_slots=2) if cache_enabled else {}
+    with native_int16_reader(files, **cache_options) as reader:
         for batch in range(grouped.n_batches):
             actual, ai = grouped.padded_batch_to_torch(batch, return_inds=True)
             expected, ei = reference.padded_batch_to_torch(batch, return_inds=True)

@@ -27,6 +27,10 @@ def main() -> int:
         args += ["--lfp-output", request["lfp_output"]]
     if request.get("stage_dir"):
         args += ["--stage-dir", request["stage_dir"]]
+    if request.get("read_cache_dir"):
+        args += ["--read-cache-dir",request["read_cache_dir"],
+                 "--read-cache-mb",str(request["read_cache_mb"]),
+                 "--read-cache-slots",str(request["read_cache_slots"])]
     code = 1
     try:
         print("TeraSort worker started; initializing Kilosort and CUDA...", flush=True)

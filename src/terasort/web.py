@@ -54,6 +54,24 @@ def _job_log(job: dict, state_dir: Path) -> str:
     return kilosort_log + ("\n--- Worker output ---\n" + worker_log if worker_log else "")
 
 
+def _latest_batch_progress(log: str) -> dict | None:
+    """Extract the newest Kilosort tqdm batch counter and its pass ETA."""
+    matches = list(re.finditer(r"([\d,]+)\s*/\s*([\d,]+)\s*\[([^\]\r\n]*)\]", log))
+    if not matches:
+        return None
+    match = matches[-1]
+    current, total = (int(value.replace(",", "")) for value in match.group(1, 2))
+    if total <= 0 or current < 0 or current > total:
+        return None
+    eta = None
+    # tqdm formats either MM:SS or H:MM:SS before the rate field.
+    remaining = re.search(r"<\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*,", match.group(3))
+    if remaining:
+        hours = int(remaining.group(1) or 0)
+        eta = hours * 3600 + int(remaining.group(2)) * 60 + int(remaining.group(3))
+    return {"current": current, "total": total, "eta_seconds": eta}
+
+
 def _progress(log: str, elapsed: float, status: str, staged: bool = False) -> dict:
     if status == "completed":
         return {"stage": "Completed", "percent": 100, "eta_seconds": 0}
@@ -63,6 +81,13 @@ def _progress(log: str, elapsed: float, status: str, staged: bool = False) -> di
         return {"stage": "Cancelled", "percent": None, "eta_seconds": None}
     if status == "queued":
         return {"stage": "Queued", "percent": 0, "eta_seconds": None}
+    batches = _latest_batch_progress(log)
+    if batches:
+        percent = 100 * batches["current"] / batches["total"]
+        return {"stage": "Batch processing", "percent": round(percent, 1),
+                "progress_label": "Current pass",
+                "progress_detail": f"{batches['current']:,} / {batches['total']:,} batches",
+                "eta_label": "Current pass ETA", "eta_seconds": batches["eta_seconds"]}
     last = -1
     for index, (_, marker, _) in enumerate(STAGES):
         if marker.lower() in log.lower():
@@ -226,6 +251,18 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     if backend not in ("auto", "standard", "deep_tiled", "cublas"):
         raise ValueError("Invalid backend")
     request["backend"] = backend
+    if data.get("read_cache_dir"):
+        cache = Path(data["read_cache_dir"]).expanduser().resolve()
+        if data.get("stage_dir") or backend == "standard" or data.get("no_fast_int16"):
+            raise ValueError('Read cache needs fast INT16 mode and cannot combine with full staging')
+        if any(cache.is_relative_to(Path(p).parent) for p in paths):
+            raise ValueError('Read cache must be outside source folders')
+        if cache.is_relative_to(output_path) or output_path.is_relative_to(cache):
+            raise ValueError('Read cache and results must be separate')
+        mb,slots = data.get("read_cache_mb",256),data.get("read_cache_slots",3)
+        if type(mb) is not int or not 1<=mb<=4096 or type(slots) is not int or not 2<=slots<=16:
+            raise ValueError('Read cache requires 1–4096 MiB blocks and 2–16 slots')
+        request.update(read_cache_dir=str(cache),read_cache_mb=mb,read_cache_slots=slots)
     for key in ("skip_drift_correction", "no_fast_int16"):
         request[key] = bool(data.get(key, False))
     if data.get("lfp_output"):

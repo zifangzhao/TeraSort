@@ -69,6 +69,29 @@ def test_validation_requires_new_separate_staging_directory(tmp_path):
         validate_request(request)
 
 
+def test_read_cache_validation(tmp_path):
+    request = _request(tmp_path)
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'recording.bin').write_bytes(b'\0' * 24)
+    request['filename'] = str(source / 'recording.bin')
+    request['read_cache_dir'] = str(tmp_path / 'cache')
+    validated = validate_request(request)
+    assert validated['read_cache_mb'] == 256
+    assert validated['read_cache_slots'] == 3
+    request['read_cache_slots'] = 1
+    with pytest.raises(ValueError, match='slots'):
+        validate_request(request)
+    request['read_cache_slots'] = 3
+    request['no_fast_int16'] = True
+    with pytest.raises(ValueError, match='fast INT16'):
+        validate_request(request)
+    request['no_fast_int16'] = False
+    request['read_cache_dir'] = str(source / 'cache')
+    with pytest.raises(ValueError, match='outside source'):
+        validate_request(request)
+
+
 def test_browse_and_stage_eta(tmp_path):
     _request(tmp_path)
     listing = browse(str(tmp_path))
