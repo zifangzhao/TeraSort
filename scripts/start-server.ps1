@@ -4,12 +4,6 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $url = 'http://127.0.0.1:8765/'
-if (-not (Test-Path -LiteralPath $python)) {
-    throw 'Environment not found. Run install_and_start.bat first.'
-}
-& $python -c 'import terasort, terasort.web'
-if ($LASTEXITCODE -ne 0) { throw 'Environment check failed. Run install_and_start.bat to repair it.' }
-
 $alreadyRunning = $false
 try {
     $health = Invoke-RestMethod -Uri ($url + 'api/health') -TimeoutSec 3
@@ -23,6 +17,31 @@ if ($alreadyRunning) {
     if (-not $NoBrowser -and -not $CheckOnly) { Start-Process $url }
     exit 0
 }
+
+if ($CheckOnly -and -not (Test-Path -LiteralPath $python)) {
+    throw 'Environment not found. Run install_and_start.bat to install it.'
+}
+
+if (-not (Test-Path -LiteralPath $python)) {
+    if ($CheckOnly) { throw 'Environment not found.' }
+    Write-Host 'Environment is missing. Installing TeraSort and its dependencies...'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Automatic environment installation failed.' }
+}
+
+& $python -c 'import importlib.metadata as m, torch, cupy, kilosort, terasort, terasort.web; assert m.version("kilosort") == "4.1.7"; assert torch.__version__.split("+",1)[0] == "2.10.0" and torch.version.cuda == "12.8"'
+$environmentReady = ($LASTEXITCODE -eq 0)
+if (-not $environmentReady) {
+    if ($CheckOnly) {
+        throw 'One or more required packages are missing or incompatible. Run install_and_start.bat to repair the environment.'
+    }
+    Write-Host 'Required packages are missing or incompatible. Repairing the environment...'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Automatic dependency repair failed.' }
+    & $python -c 'import importlib.metadata as m, torch, cupy, kilosort, terasort, terasort.web; assert m.version("kilosort") == "4.1.7"; assert torch.__version__.split("+",1)[0] == "2.10.0" and torch.version.cuda == "12.8"'
+    if ($LASTEXITCODE -ne 0) { throw 'Required dependencies are still unavailable after repair.' }
+}
+
 if ($CheckOnly) {
     Write-Host "Environment ready. Start the dashboard with start_server.bat ($url)."
     exit 0

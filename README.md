@@ -19,7 +19,7 @@ They require the complete repository; copying only a batch file elsewhere
 does not install the source code or Python itself. A custom Python executable
 can be supplied as `install_and_start.bat "C:\path\to\python.exe"`.
 
-Use 64-bit Python 3.11, Git, an NVIDIA GPU and compatible driver, and an
+Use 64-bit Python 3.10–3.14, Git, an NVIDIA GPU and compatible driver, and an
 internet connection for Python packages. In PowerShell, clone the repository
 and run its installer:
 
@@ -30,17 +30,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
 If you already cloned TeraSort, run the last command from that directory and
-skip cloning. The installer creates `.venv` in the repository,
-installs CUDA PyTorch and TeraSort's pinned dependencies, then compiles a small
-CUDA detection kernel and lists the available sorting backends. It uses
-an existing `.runtime-python/cpython-3.11.16/python/python.exe` when available,
-otherwise `py -3.11`. If
-`py -3.11 --version` cannot find Python 3.11, pass the path to a 64-bit Python
-3.11 executable:
+skip cloning. The installer reuses an existing supported `.venv`, or creates
+one with the bundled Python 3.11 runtime or an installed Python 3.10–3.14. It
+installs missing packages, repairs an incompatible PyTorch build, checks the
+dependency set, then compiles a small CUDA detection kernel and lists available
+sorting backends. To select a specific supported Python executable, pass it
+with `-Python`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Python 'C:\path\to\python.exe'
 ```
+
+If a dependency is later removed or becomes inconsistent, run
+`install_and_start.bat` to repair the environment. `start_server.bat` also
+repairs missing or incompatible packages when no dashboard is already running.
 
 Verify an existing installation or inspect the commands without activation:
 
@@ -52,7 +55,7 @@ Verify an existing installation or inspect the commands without activation:
 ```
 
 The expected CUDA check is `True`; `backends` lists `cublas` on the tested
-Windows x64 setup. For a manual installation, create `.venv` with Python 3.11,
+Windows x64 setup. For a manual installation, create `.venv` with Python 3.10–3.14,
 then run the following from the repository root:
 
 ```powershell

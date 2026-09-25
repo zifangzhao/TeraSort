@@ -17,7 +17,7 @@ exit /b %terasortExit%
 :failed
 echo.
 echo Installation failed. Review the error above.
-echo Requires 64-bit Python 3.11, an NVIDIA GPU/driver, and internet access.
+echo Requires 64-bit Python 3.10-3.14, an NVIDIA GPU/driver, and internet access.
 pause
 popd
 exit /b 1

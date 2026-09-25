@@ -7,7 +7,7 @@ name = "terasort-neural"
 version = "0.5.0"
 description = "Kilosort 4.1.7-compatible CUDA sorting adapters and spike candidate bank"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10,<3.15"
 license = "GPL-3.0-only"
 dependencies = [
   "kilosort==4.1.7",
