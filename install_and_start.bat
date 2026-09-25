@@ -35,6 +35,7 @@ popd
 exit /b 1
 :help
 echo Double-click to install the environment, check CUDA, and start TeraSort.
+echo A compatible system Python is detected automatically when available.
 echo Optional: install_and_start.bat "C:\path\to\python.exe"
 echo Or: install_and_start.bat -Python "C:\path\to\python.exe"
 echo Keep this file in the TeraSort repository root, alongside scripts and src.

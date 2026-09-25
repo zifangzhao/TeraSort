@@ -46,11 +46,78 @@ if (Test-Path -LiteralPath $venvPython) {
         throw "The existing environment folder '$venv' is incomplete. Move or remove it before reinstalling."
     }
     if (-not $basePython) {
-        $localRuntime = Join-Path $root '.runtime-python/cpython-3.11.16/python/python.exe'
-        if (Test-Path -LiteralPath $localRuntime) {
-            $localInfo = Get-PythonInfo $localRuntime
-            if (Test-SupportedPython $localInfo) {
-                $basePython, $baseInfo = $localRuntime, $localInfo
+        $pythonCandidates = @()
+        $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+        if ($pythonCommand) { $pythonCandidates += $pythonCommand.Source }
+
+        $userHome = [Environment]::GetFolderPath('UserProfile')
+        $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+        $programData = [Environment]::GetFolderPath('CommonApplicationData')
+        $commonRoots = @(
+            (Join-Path $userHome 'anaconda3'),
+            (Join-Path $userHome 'Anaconda3'),
+            (Join-Path $userHome 'miniconda3'),
+            (Join-Path $userHome 'Miniconda3'),
+            (Join-Path $userHome 'miniforge3'),
+            (Join-Path $userHome 'mambaforge'),
+            (Join-Path $localAppData 'Programs\Python'),
+            (Join-Path $localAppData 'Continuum\anaconda3'),
+            (Join-Path $programData 'anaconda3'),
+            (Join-Path $programData 'miniconda3')
+        )
+        foreach ($rootPath in $commonRoots) {
+            if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { continue }
+            if ((Split-Path -Leaf $rootPath) -eq 'Python') {
+                foreach ($install in Get-ChildItem -LiteralPath $rootPath -Directory -ErrorAction SilentlyContinue) {
+                    $pythonCandidates += Join-Path $install.FullName 'python.exe'
+                }
+            } else {
+                $pythonCandidates += Join-Path $rootPath 'python.exe'
+            }
+        }
+
+        foreach ($registryRoot in @(
+            'HKCU:\Software\Python\PythonCore',
+            'HKLM:\Software\Python\PythonCore',
+            'HKLM:\Software\WOW6432Node\Python\PythonCore'
+        )) {
+            foreach ($versionKey in Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue) {
+                $installKey = Join-Path $versionKey.PSPath 'InstallPath'
+                if (-not (Test-Path -LiteralPath $installKey)) { continue }
+                try {
+                    $properties = Get-ItemProperty -LiteralPath $installKey
+                    if ($properties.ExecutablePath) { $pythonCandidates += $properties.ExecutablePath }
+                    $installPath = (Get-Item -LiteralPath $installKey).GetValue('')
+                    if ($installPath) {
+                        if ([IO.Path]::GetExtension($installPath) -ieq '.exe') {
+                            $pythonCandidates += $installPath
+                        } else {
+                            $pythonCandidates += Join-Path $installPath 'python.exe'
+                        }
+                    }
+                } catch { }
+            }
+        }
+
+        if (Get-Command conda -ErrorAction SilentlyContinue) {
+            try {
+                $condaRoot = & conda info --base 2>$null
+                if ($LASTEXITCODE -eq 0 -and $condaRoot) {
+                    $pythonCandidates += Join-Path ($condaRoot | Select-Object -Last 1) 'python.exe'
+                }
+            } catch { }
+        }
+
+        $seenCandidates = @{}
+        foreach ($candidate in $pythonCandidates) {
+            if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            $candidateKey = [IO.Path]::GetFullPath($candidate).ToLowerInvariant()
+            if ($seenCandidates.ContainsKey($candidateKey)) { continue }
+            $seenCandidates[$candidateKey] = $true
+            $candidateInfo = Get-PythonInfo $candidate
+            if (Test-SupportedPython $candidateInfo) {
+                $basePython, $baseInfo = $candidate, $candidateInfo
+                break
             }
         }
     }
@@ -65,11 +132,11 @@ if (Test-Path -LiteralPath $venvPython) {
         }
     }
     if (-not $basePython) {
-        $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
-        if ($pythonCommand) {
-            $candidateInfo = Get-PythonInfo $pythonCommand.Source
-            if (Test-SupportedPython $candidateInfo) {
-                $basePython, $baseInfo = $pythonCommand.Source, $candidateInfo
+        $localRuntime = Join-Path $root '.runtime-python/cpython-3.11.16/python/python.exe'
+        if (Test-Path -LiteralPath $localRuntime) {
+            $localInfo = Get-PythonInfo $localRuntime
+            if (Test-SupportedPython $localInfo) {
+                $basePython, $baseInfo = $localRuntime, $localInfo
             }
         }
     }

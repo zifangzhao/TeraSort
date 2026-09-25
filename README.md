@@ -32,8 +32,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 If you already cloned TeraSort, run the last command from that directory and
 skip cloning. The installer reuses an existing supported `.venv`, or creates
-one with the bundled Python 3.11 runtime or an installed Python 3.10–3.14. It
-installs missing packages, repairs an incompatible PyTorch build, checks the
+one with a detected system Python 3.10–3.14, falling back to the bundled Python
+3.11 runtime. Detection checks the active `python.exe`, Windows install
+registry, common Conda folders, and the Python launcher. It installs missing
+packages, repairs an incompatible PyTorch build, checks the
 dependency set, then compiles a small CUDA detection kernel and lists available
 sorting backends. To select a specific supported Python executable, pass it
 with `-Python`:
