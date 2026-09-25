@@ -216,7 +216,8 @@ detection and matching paths. TeraSort still applies source-guarded clustering
 optimizations on verified Kilosort 4.1.7 installs: GPU L2 neighbor search runs
 in bounded batches, near-tie rows are checked with CPU FAISS, and a sampled
 exact check falls back to the original CPU search if any neighbor set differs.
-The CPU feature gather is vectorized as well. Use `kilosort.run_kilosort`
+The CPU feature gather is vectorized, and FAISS CPU work uses up to eight
+threads while respecting a lower existing limit. Use `kilosort.run_kilosort`
 directly for an unmodified Kilosort baseline. The measured neighbor-search
 comparison is recorded in
 [`docs/evidence/postcluster_gpu_benchmark_20260925.md`](docs/evidence/postcluster_gpu_benchmark_20260925.md);

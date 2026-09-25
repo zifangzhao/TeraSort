@@ -6,6 +6,7 @@ import importlib
 import importlib.metadata
 import inspect
 import logging
+import os
 
 import torch
 
@@ -13,6 +14,24 @@ import torch
 _KILOSORT_VERSION = "4.1.7"
 _GET_DATA_CPU_SHA256 = "6c47db7f1a44f31a1a7d9fb1d250cae224889fe3d1f5f141d5c332708a0bcc8f"
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def bounded_faiss_threads(maximum=8):
+    """Cap FAISS oversubscription during Kilosort, then restore its prior limit."""
+    import faiss
+
+    previous = faiss.omp_get_max_threads()
+    available = os.cpu_count() or maximum
+    selected = min(previous, maximum, available)
+    if selected != previous:
+        faiss.omp_set_num_threads(selected)
+        logger.info("TeraSort limits FAISS to %d CPU threads for this sort", selected)
+    try:
+        yield selected
+    finally:
+        if selected != previous:
+            faiss.omp_set_num_threads(previous)
 
 
 def _make_vectorized_gather(reference):

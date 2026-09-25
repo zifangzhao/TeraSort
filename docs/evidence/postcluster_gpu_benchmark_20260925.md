@@ -26,6 +26,14 @@ substage. The resulting sparse neighbor edges were exactly equal. Some
 individual neighbor rows had a different order, which does not change the
 Kilosort graph.
 
+The same feature slice was also used to compare CPU FAISS thread counts,
+including sparse graph construction. Medians across two runs were 1.157
+seconds at 4 threads, 1.030 seconds at 8, 1.132 seconds at 16, and 1.188
+seconds at 28 (the machine default). TeraSort now caps FAISS at eight threads
+per sorting worker and restores the prior setting afterward. This also helps
+the CPU-only route and avoids launching 28 FAISS workers for each concurrent
+session.
+
 This is a focused substage measurement, not a complete rerun or a ground-truth
 quality comparison. The full final-clustering stage includes iterative cluster
 assignment and splitting, so its end-to-end gain will be smaller. The CPU
