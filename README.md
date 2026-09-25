@@ -17,7 +17,8 @@ dashboard or starts a new local server. Keep the server console open while
 using it. Both batch files locate the repository relative to their own paths.
 They require the complete repository; copying only a batch file elsewhere
 does not install the source code or Python itself. A custom Python executable
-can be supplied as `install_and_start.bat "C:\path\to\python.exe"`.
+can be supplied as `install_and_start.bat -Python "C:\path\to\python.exe"`
+or positionally as `install_and_start.bat "C:\path\to\python.exe"`.
 
 Use 64-bit Python 3.10–3.14, Git, an NVIDIA GPU and compatible driver, and an
 internet connection for Python packages. In PowerShell, clone the repository
