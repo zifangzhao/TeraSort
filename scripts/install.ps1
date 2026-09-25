@@ -35,7 +35,7 @@ if ($Python) {
 if (Test-Path -LiteralPath $venvPython) {
     $existingInfo = Get-PythonInfo $venvPython
     if (-not (Test-SupportedPython $existingInfo)) {
-        throw "The existing .venv is not a supported 64-bit Python 3.10–3.14 environment. Move or remove '$venv' before reinstalling."
+        throw "The existing .venv is not a supported 64-bit Python 3.10-3.14 environment. Move or remove '$venv' before reinstalling."
     }
     if ($baseInfo -and ($baseInfo.major -ne $existingInfo.major -or $baseInfo.minor -ne $existingInfo.minor)) {
         throw "The existing .venv uses Python $($existingInfo.major).$($existingInfo.minor); it cannot be switched to $($baseInfo.major).$($baseInfo.minor) in place. Move or remove '$venv' first."
@@ -47,8 +47,17 @@ if (Test-Path -LiteralPath $venvPython) {
     }
     if (-not $basePython) {
         $pythonCandidates = @()
-        $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
-        if ($pythonCommand) { $pythonCandidates += $pythonCommand.Source }
+        $pythonFindings = @()
+        if ($env:CONDA_PREFIX) {
+            $pythonCandidates += Join-Path $env:CONDA_PREFIX 'python.exe'
+        }
+        foreach ($commandName in @('python.exe', 'python3.exe')) {
+            foreach ($pythonCommand in @(Get-Command $commandName -All -ErrorAction SilentlyContinue)) {
+                if ($pythonCommand.Source) { $pythonCandidates += $pythonCommand.Source }
+            }
+            $whereCandidates = & where.exe $commandName 2>$null
+            if ($LASTEXITCODE -eq 0) { $pythonCandidates += $whereCandidates }
+        }
 
         $userHome = [Environment]::GetFolderPath('UserProfile')
         $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
@@ -115,6 +124,9 @@ if (Test-Path -LiteralPath $venvPython) {
             if ($seenCandidates.ContainsKey($candidateKey)) { continue }
             $seenCandidates[$candidateKey] = $true
             $candidateInfo = Get-PythonInfo $candidate
+            if ($candidateInfo) {
+                $pythonFindings += "${candidate} (Python $($candidateInfo.major).$($candidateInfo.minor), $($candidateInfo.bits)-bit)"
+            }
             if (Test-SupportedPython $candidateInfo) {
                 $basePython, $baseInfo = $candidate, $candidateInfo
                 break
@@ -141,7 +153,8 @@ if (Test-Path -LiteralPath $venvPython) {
         }
     }
     if (-not $basePython) {
-        throw "A 64-bit Python 3.10–3.14 executable is required. Install one or pass -Python 'C:\path\to\python.exe'."
+        $discoveryDetails = if ($pythonFindings.Count) { " Found: $($pythonFindings -join '; ')." } else { ' No runnable Python interpreters were found on Conda, PATH, or the Python launcher.' }
+        throw "A 64-bit Python 3.10-3.14 executable is required. Install one or pass -Python 'C:\path\to\python.exe'.$discoveryDetails"
     }
     Write-Host "Creating environment with Python $($baseInfo.major).$($baseInfo.minor)."
     & $basePython @baseArgs -m venv $venv
