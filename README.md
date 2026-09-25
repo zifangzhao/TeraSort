@@ -95,9 +95,16 @@ LFP route retains its existing 1250 Hz output and 500 Hz passband settings.
 This imports metadata for the existing dashboard's Kilosort-compatible sorting
 route. It does not run MATLAB, sleep-state scoring or behavioral analysis from
 `preprocessSession.m`, modify source XML, or physically concatenate raw files.
-Multiple selected files retain the existing ordered-source handling; LFP export
-currently supports one selected source per job. Apply one XML only to files
-known to share its acquisition configuration.
+The recording picker filters supported raw INT16 `.dat` and `.bin` files, with
+Intan export and Neuropixels views. Native Intan `.rhd`/`.rhs` and compressed
+`.cbin` need conversion before sorting. You can select multiple recording
+segments together; click order is acquisition order and all segments become one
+sort session. TeraSort looks for a valid same-name XML or `amplifier.xml` beside
+the first selected file and loads it automatically. The output defaults to a
+dedicated `<recording>_terasort` folder beside that file, keeping the acquisition
+folder contents intact. Change the output path if the source folder is read-only
+or you want results elsewhere. LFP export currently supports one source per job.
+Apply one XML only to files known to share its acquisition configuration.
 
 Launch the local web service after installation:
 

@@ -136,11 +136,16 @@ def browse(path: str | None, kinds: str = "all") -> dict:
         raise ValueError("Selected path is not a directory")
     entries = []
     truncated = False
+    extensions = {"recordings": {".dat", ".bin"},
+                  "intan": {".dat"},
+                  "neuropixels": {".dat", ".bin"}}.get(kinds)
     for child in directory.iterdir():
         try:
             if child.is_dir():
                 entries.append({"name": child.name, "path": str(child), "kind": "directory"})
             elif kinds != "directories" and child.is_file():
+                if extensions is not None and child.suffix.lower() not in extensions:
+                    continue
                 entries.append({"name": child.name, "path": str(child), "kind": "file",
                                 "bytes": child.stat().st_size})
         except (OSError, PermissionError):
@@ -152,6 +157,41 @@ def browse(path: str | None, kinds: str = "all") -> dict:
     parent = None if directory.parent == directory else str(directory.parent)
     return {"path": str(directory), "parent": parent, "entries": entries[:2000],
             "truncated": truncated}
+
+
+def recording_info(path: str, reserved_outputs: set[str] | None = None) -> dict:
+    """Find a valid adjacent Neuroscope XML and a safe output folder suggestion."""
+    source = Path(path).expanduser().resolve(strict=True)
+    if not source.is_file() or source.suffix.lower() not in {".dat", ".bin"}:
+        raise ValueError("Choose a raw INT16 .dat or .bin recording")
+    xml_path = None
+    candidates = (source.with_suffix(".xml"), source.parent / "amplifier.xml")
+    seen = set()
+    from .neuroscope import read_xml
+    for candidate in candidates:
+        key = os.path.normcase(str(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            try:
+                read_xml(candidate)
+            except (OSError, ValueError):
+                continue
+            xml_path = str(candidate.resolve())
+            break
+    reserved = {os.path.normcase(str(Path(p).resolve())) for p in (reserved_outputs or set())}
+    base = f"{source.stem[:160]}_terasort"
+    index = 1
+    while True:
+        name = base if index == 1 else f"{base}_{index:02d}"
+        output = source.parent / name
+        output_key = os.path.normcase(str(output.resolve()))
+        occupied = output.exists() and (not output.is_dir() or any(output.iterdir()))
+        if output_key not in reserved and not occupied:
+            break
+        index += 1
+    return {"source": str(source), "xml_path": xml_path, "results_dir": str(output.resolve())}
 
 
 def validate_request(data: dict, existing_outputs: set[str] | None = None) -> dict:
@@ -537,6 +577,11 @@ def create_handler(manager: JobManager, token: str | None = None):
                 elif split.path == "/api/browse":
                     query = parse_qs(split.query)
                     self._json(200, browse(query.get("path", [None])[0], query.get("kind", ["all"])[0]))
+                elif split.path == "/api/recording-info":
+                    query = parse_qs(split.query)
+                    with manager.lock:
+                        reserved = {job["request"]["results_dir"] for job in manager.jobs.values()}
+                    self._json(200, recording_info(query.get("path", [""])[0], reserved))
                 elif split.path == "/api/neuroscope":
                     from .neuroscope import read_xml, generate_probe
                     query = parse_qs(split.query)
