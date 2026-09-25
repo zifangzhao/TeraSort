@@ -159,6 +159,35 @@ def browse(path: str | None, kinds: str = "all") -> dict:
             "truncated": truncated}
 
 
+def find_dat_files_recursive(path: str) -> dict:
+    """List .dat recordings under a selected folder in natural path order."""
+    directory = Path(path).expanduser().resolve(strict=True)
+    if not directory.is_dir():
+        raise ValueError("Selected path is not a directory")
+
+    inaccessible = 0
+
+    def on_walk_error(_error: OSError) -> None:
+        nonlocal inaccessible
+        inaccessible += 1
+
+    files = []
+    for current, _, filenames in os.walk(
+            directory, topdown=True, onerror=on_walk_error, followlinks=False):
+        for filename in filenames:
+            if Path(filename).suffix.lower() != ".dat":
+                continue
+            files.append(str(Path(current) / filename))
+    files.sort(key=lambda item: _natural_path_key(str(Path(item).relative_to(directory))))
+    return {"path": str(directory), "files": files, "count": len(files),
+            "inaccessible_directories": inaccessible}
+
+
+def _natural_path_key(value: str) -> tuple:
+    return tuple((0, int(part)) if part.isdigit() else (1, part.casefold())
+                 for part in re.split(r"(\d+)", value))
+
+
 def recording_info(path: str, reserved_outputs: set[str] | None = None) -> dict:
     """Find a valid adjacent Neuroscope XML and a safe output folder suggestion."""
     source = Path(path).expanduser().resolve(strict=True)
@@ -677,6 +706,9 @@ def create_handler(manager: JobManager, token: str | None = None):
                 elif split.path == "/api/browse":
                     query = parse_qs(split.query)
                     self._json(200, browse(query.get("path", [None])[0], query.get("kind", ["all"])[0]))
+                elif split.path == "/api/recordings-recursive":
+                    query = parse_qs(split.query)
+                    self._json(200, find_dat_files_recursive(query.get("path", [""])[0]))
                 elif split.path == "/api/recording-info":
                     query = parse_qs(split.query)
                     with manager.lock:
