@@ -70,9 +70,43 @@ then run the following from the repository root:
 
 The included cuBLAS bridge uses the cuBLAS DLL from the tested PyTorch 2.10
 CUDA 12.8 installation. The package installs the NVRTC runtime required by
-CuPy; other `.cu` kernels compile on first use.
-Installation does not download a recording. Other platforms have not been
-validated in this package; the included Windows DLL does not run elsewhere.
+CuPy; other `.cu` kernels compile on first use. Installation does not download
+a recording. The included cuBLAS bridge is Windows x64 only.
+
+## Install on a Linux NVIDIA server
+
+The Linux installer supports a 64-bit Linux server with an NVIDIA GPU and
+driver, Git, internet access, and Python 3.10–3.14 with `venv`. Check that
+`nvidia-smi` works before installation. A separate system CUDA toolkit is not
+needed; PyTorch and CuPy install their CUDA runtime components in the virtual
+environment. On minimal Debian or Ubuntu images, install the matching
+`python3-venv` package if virtual-environment creation fails.
+
+```bash
+git clone https://github.com/zifangzhao/TeraSort.git
+cd TeraSort
+chmod +x install_and_start.sh start_server.sh scripts/install-linux.sh
+./install_and_start.sh --no-browser
+```
+
+The installer chooses the first supported `python3.14` through `python3.10`
+found on `PATH`. To choose an interpreter explicitly, use
+`./install_and_start.sh --python /path/to/python --no-browser`. It creates or
+repairs `.venv`, installs the CUDA 12.8 PyTorch build and project dependencies,
+then checks CUDA access and compiles the candidate-detection kernel. For later
+starts, run `./start_server.sh --no-browser`. The dashboard listens on
+`127.0.0.1:8765` by default. From your workstation, use an SSH tunnel with
+`ssh -L 8765:127.0.0.1:8765 user@server`, then open `http://127.0.0.1:8765/`.
+
+For direct network access, set a long bearer token and bind to a reachable
+interface, for example `export TERASORT_WEB_TOKEN='your-long-random-token'`
+followed by `./start_server.sh --host 0.0.0.0 --no-browser`. The dashboard
+uses plain HTTP; prefer an SSH tunnel or put it behind a TLS-terminating proxy.
+
+On Linux, `auto` uses the standard Kilosort route. The portable `deep_tiled`
+CUDA backend is also available. The bundled cuBLAS bridge and its specialized
+backend are Windows-only, and Linux has not yet passed the project's full
+recording-quality and long-duration validation suite.
 
 ## Browser dashboard
 
