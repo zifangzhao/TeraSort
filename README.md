@@ -115,8 +115,12 @@ Launch the local web service after installation:
 It opens `http://127.0.0.1:8765/`. Select one or more raw binaries in
 acquisition order, settings JSON, probe
 JSON (or bundled probe name), and a new results directory. The browser lists
-files on the recording machine; it never uploads the raw data. Jobs run one at
-a time to avoid GPU contention. The queue and logs persist in
+files on the recording machine; it never uploads the raw data. The queue runs
+one session at a time by default. Set **Concurrent sessions** in the queue
+panel to 1–4; the limit persists with the dashboard state and applies to newly
+launched jobs. Running jobs continue if the limit is lowered. Concurrent jobs
+share GPU memory, CPU, network and disk bandwidth, so test higher limits on
+your hardware before queuing large sessions. The queue and logs persist in
 `%USERPROFILE%\.terasort\web` by default, or a directory supplied with
 `--state-dir`. Keep the service running to launch queued jobs. An active worker
 continues if the browser closes; the dashboard can reconnect after a server

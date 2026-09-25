@@ -325,14 +325,42 @@ class JobManager:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.jobs = {}
-        self.active = None
-        self.process = None
+        self.active = set()
+        self.max_concurrent_jobs = 1
+        self.settings_path = self.state_dir / "dashboard_settings.json"
+        self._load_settings()
         self.metrics = {"system_cpu_percent": None, "system_ram_percent": None,
                         "gpu_percent": None, "gpu_memory_mib": None,
                         "gpu_memory_total_mib": None, "job_ram_mib": None}
         self._load()
         self.thread = threading.Thread(target=self._loop, name="terasort-web-scheduler", daemon=True)
         self.thread.start()
+
+    def _load_settings(self) -> None:
+        try:
+            settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            value = settings.get("max_concurrent_jobs", 1)
+            if type(value) is int and 1 <= value <= 4:
+                self.max_concurrent_jobs = value
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    def settings(self) -> dict:
+        with self.lock:
+            return {"max_concurrent_jobs": self.max_concurrent_jobs,
+                    "active_jobs": len(self.active),
+                    "queued_jobs": sum(job["status"] == "queued" for job in self.jobs.values())}
+
+    def update_settings(self, data: dict) -> dict:
+        value = data.get("max_concurrent_jobs") if isinstance(data, dict) else None
+        if type(value) is not int or not 1 <= value <= 4:
+            raise ValueError("Concurrent sessions must be an integer from 1 to 4")
+        with self.lock:
+            self.max_concurrent_jobs = value
+            temporary = self.settings_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"max_concurrent_jobs": value}, indent=2), encoding="utf-8")
+            temporary.replace(self.settings_path)
+            return self.settings()
 
     def _job_dir(self, job_id: str) -> Path:
         return self.state_dir / job_id
@@ -356,7 +384,7 @@ class JobManager:
                     job["finished_at"] = result["finished_at"]
                 elif job["status"] == "running":
                     if self._alive(job):
-                        self.active = job["id"]
+                        self.active.add(job["id"])
                     else:
                         job["status"] = "failed"
                         job["error"] = "Worker stopped without a completion record"
@@ -413,9 +441,7 @@ class JobManager:
                     process.terminate()
                 job["status"] = "cancelled"
                 job["finished_at"] = time.time()
-                if self.active == job_id:
-                    self.active = None
-                    self.process = None
+                self.active.discard(job_id)
                 self._save(job)
             return self.view(job_id, include_log=False)
 
@@ -458,52 +484,54 @@ class JobManager:
         job["started_at"] = time.time()
         job["pid"] = process.pid
         job["process_created_at"] = psutil.Process(process.pid).create_time()
-        self.process = process
-        self.active = job["id"]
+        self.active.add(job["id"])
         self._save(job)
 
     def _refresh(self) -> None:
-        if self.active:
-            job = self.jobs[self.active]
+        for job_id in tuple(self.active):
+            job = self.jobs[job_id]
             done = self._job_dir(job["id"]) / "done.json"
             if done.exists():
                 result = json.loads(done.read_text(encoding="utf-8"))
                 job["status"] = "completed" if result["exit_code"] == 0 else "failed"
                 job["finished_at"] = result["finished_at"]
                 self._save(job)
-                self.active = None
-                self.process = None
+                self.active.discard(job_id)
             elif not self._alive(job):
                 job["status"] = "failed"
                 job["finished_at"] = time.time()
                 job["error"] = "Worker stopped without a completion record"
                 self._save(job)
-                self.active = None
-                self.process = None
-        if not self.active:
-            pending = sorted((j for j in self.jobs.values() if j["status"] == "queued"),
-                             key=lambda j: j["created_at"])
-            if pending:
-                try:
-                    self._launch(pending[0])
-                except (OSError, psutil.Error) as exc:
-                    pending[0]["status"] = "failed"
-                    pending[0]["error"] = str(exc)
-                    pending[0]["finished_at"] = time.time()
-                    self._save(pending[0])
+                self.active.discard(job_id)
+        pending = sorted((j for j in self.jobs.values() if j["status"] == "queued"),
+                         key=lambda j: j["created_at"])
+        while pending and len(self.active) < self.max_concurrent_jobs:
+            job = pending.pop(0)
+            try:
+                self._launch(job)
+            except (OSError, psutil.Error) as exc:
+                job["status"] = "failed"
+                job["error"] = str(exc)
+                job["finished_at"] = time.time()
+                self._save(job)
 
     def _sample(self) -> None:
         metrics = {"system_cpu_percent": psutil.cpu_percent(interval=None),
                    "system_ram_percent": psutil.virtual_memory().percent,
                    "gpu_percent": None, "gpu_memory_mib": None,
                    "gpu_memory_total_mib": None, "job_ram_mib": None}
-        if self.active:
+        with self.lock:
+            active = tuple(self.active)
+        ram_bytes = 0
+        for job_id in active:
             try:
-                process = psutil.Process(self.jobs[self.active]["pid"])
-                metrics["job_ram_mib"] = round(sum(p.memory_info().rss for p in
-                    [process, *process.children(recursive=True)]) / 1048576)
+                process = psutil.Process(self.jobs[job_id]["pid"])
+                ram_bytes += sum(p.memory_info().rss for p in
+                                 [process, *process.children(recursive=True)])
             except psutil.Error:
-                pass
+                continue
+        if ram_bytes:
+            metrics["job_ram_mib"] = round(ram_bytes / 1048576)
         try:
             result = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
                                      "--format=csv,noheader,nounits"], capture_output=True, text=True,
@@ -574,6 +602,8 @@ def create_handler(manager: JobManager, token: str | None = None):
                     self._json(200, {"ok": True, "token_required": bool(token)})
                 elif split.path == "/api/metrics":
                     self._json(200, dict(manager.metrics))
+                elif split.path == "/api/settings":
+                    self._json(200, manager.settings())
                 elif split.path == "/api/browse":
                     query = parse_qs(split.query)
                     self._json(200, browse(query.get("path", [None])[0], query.get("kind", ["all"])[0]))
@@ -613,6 +643,8 @@ def create_handler(manager: JobManager, token: str | None = None):
                 data = json.loads(self.rfile.read(length))
                 if self.path == "/api/jobs":
                     self._json(201, manager.add(data))
+                elif self.path == "/api/settings":
+                    self._json(200, manager.update_settings(data))
                 elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/cancel", self.path):
                     self._json(200, manager.cancel(self.path.split("/")[3]))
                 else:
