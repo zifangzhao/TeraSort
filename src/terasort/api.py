@@ -65,9 +65,12 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     """Run Kilosort with the same input arguments, return tuple and Phy files.
 
     ``backend='auto'`` selects the tested Windows x64 cuBLAS path when CUDA is
-    available and otherwise uses unmodified Kilosort. ``backend='standard'``
-    always calls unmodified Kilosort. ``deep_tiled`` uses the portable CuPy CUDA
-    kernels, while ``cublas`` requires the included Windows x64 native bridge.
+    available and otherwise uses Kilosort's standard detection and matching
+    algorithms. ``backend='standard'`` disables those alternate detection and
+    matching paths. On verified Kilosort 4.1.7 installs, both modes still use
+    TeraSort's guarded clustering gather and, with CUDA, GPU neighbor search.
+    ``deep_tiled`` uses the portable CuPy CUDA kernels, while ``cublas`` requires
+    the included Windows x64 native bridge.
     The INT16 reader supports named read-only INT16 binaries, including ordered
     Kilosort multi-file sessions.
     ``skip_drift_correction=True`` sets Kilosort's ``nblocks=0`` for this run
@@ -133,6 +136,10 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         filename = staged if len(staged) > 1 else staged[0]
 
     with ExitStack() as stack:
+        from .kilosort_gpu_cluster import vectorized_kilosort_neighbors
+        stack.enter_context(vectorized_kilosort_neighbors(device=device))
+        from .kilosort_cpu import vectorized_kilosort_gather
+        stack.enter_context(vectorized_kilosort_gather())
         if selected == "cublas":
             from .kilosort_cublas import cublas_kilosort
             stack.enter_context(cublas_kilosort(device=device))

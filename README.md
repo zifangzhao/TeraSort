@@ -210,12 +210,22 @@ result = run_kilosort(
 ```
 
 `backend="auto"` selects the cuBLAS path for the tested six-template,
-61-sample geometry on Windows/CUDA and uses unmodified Kilosort otherwise.
-`backend="standard"` always runs Kilosort unchanged. Explicit options are
-`deep_tiled` and `cublas`. For named read-only INT16 binaries, the fast
-reader transfers INT16 to the GPU and converts to calibrated FP32 there;
-sorting arithmetic remains FP32. Pass `fast_int16=False` to use Kilosort's
-reader. Other Kilosort arguments are forwarded unchanged.
+61-sample geometry on Windows/CUDA and otherwise uses Kilosort's standard
+detection and matching algorithms. `backend="standard"` disables the alternate
+detection and matching paths. TeraSort still applies source-guarded clustering
+optimizations on verified Kilosort 4.1.7 installs: GPU L2 neighbor search runs
+in bounded batches, near-tie rows are checked with CPU FAISS, and a sampled
+exact check falls back to the original CPU search if any neighbor set differs.
+The CPU feature gather is vectorized as well. Use `kilosort.run_kilosort`
+directly for an unmodified Kilosort baseline. The measured neighbor-search
+comparison is recorded in
+[`docs/evidence/postcluster_gpu_benchmark_20260925.md`](docs/evidence/postcluster_gpu_benchmark_20260925.md);
+it measures one clustering substage and does not claim an end-to-end sort
+speedup. Explicit options are `deep_tiled` and `cublas`. For named read-only
+INT16 binaries, the fast reader transfers INT16 to the GPU and converts to
+calibrated FP32 there; sorting arithmetic remains FP32. Pass
+`fast_int16=False` to use Kilosort's reader. Other Kilosort arguments are
+forwarded unchanged.
 
 Drift correction is enabled by Kilosort's default settings. For a recording
 where you want to skip motion estimation and its extra spike-detection pass,
