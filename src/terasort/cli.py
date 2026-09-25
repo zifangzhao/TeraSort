@@ -93,6 +93,8 @@ def main(argv=None):
     sort.add_argument("--read-cache-dir", type=Path, help="Bounded SSD cache with background network read-ahead")
     sort.add_argument("--read-cache-mb", type=int, default=4096)
     sort.add_argument("--read-cache-slots", type=int, default=2)
+    sort.add_argument("--read-cache-workers", type=int, default=4,
+                      help="Parallel range downloads per prefetched block (1–16; default 4)")
     sort.add_argument("--stage-dir", type=Path,
                       help="New local scratch directory for one-time source copies (retained after sorting)")
     sort.add_argument("--skip-drift-correction", action="store_true",
@@ -174,7 +176,7 @@ def main(argv=None):
                  skip_drift_correction=args.skip_drift_correction,
                  stage_dir=args.stage_dir,
                  read_cache_dir=args.read_cache_dir, read_cache_mb=args.read_cache_mb,
-                 read_cache_slots=args.read_cache_slots,
+                 read_cache_slots=args.read_cache_slots, read_cache_workers=args.read_cache_workers,
                  lfp_output=args.lfp_output,
                  lfp_passband_hz=args.lfp_passband_hz,
                  lfp_workers=args.lfp_workers,

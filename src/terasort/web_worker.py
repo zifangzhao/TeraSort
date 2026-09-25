@@ -30,7 +30,8 @@ def main() -> int:
     if request.get("read_cache_dir"):
         args += ["--read-cache-dir",request["read_cache_dir"],
                  "--read-cache-mb",str(request["read_cache_mb"]),
-                 "--read-cache-slots",str(request["read_cache_slots"])]
+                 "--read-cache-slots",str(request["read_cache_slots"]),
+                 "--read-cache-workers",str(request.get("read_cache_workers", 4))]
     code = 1
     try:
         print("TeraSort worker started; initializing Kilosort and CUDA...", flush=True)

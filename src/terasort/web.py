@@ -324,14 +324,24 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         cache = Path(data["read_cache_dir"]).expanduser().resolve()
         if data.get("stage_dir") or backend == "standard" or data.get("no_fast_int16"):
             raise ValueError('Read cache needs fast INT16 mode and cannot combine with full staging')
+        from .api import _select_backend
+        try:
+            cache_backend = _select_backend(backend, None, settings)
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
+        if cache_backend == "standard":
+            raise ValueError('Read cache needs the cublas or deep_tiled backend; auto selected standard Kilosort')
         if any(cache.is_relative_to(Path(p).parent) for p in paths):
             raise ValueError('Read cache must be outside source folders')
         if cache.is_relative_to(output_path) or output_path.is_relative_to(cache):
             raise ValueError('Read cache and results must be separate')
         mb,slots = data.get("read_cache_mb",4096),data.get("read_cache_slots",2)
-        if type(mb) is not int or not 1<=mb<=4096 or type(slots) is not int or not 2<=slots<=16:
-            raise ValueError('Read cache requires 1–4096 MiB blocks and 2–16 slots')
-        request.update(read_cache_dir=str(cache),read_cache_mb=mb,read_cache_slots=slots)
+        workers = data.get("read_cache_workers",4)
+        if (type(mb) is not int or not 1<=mb<=4096 or type(slots) is not int or not 2<=slots<=16
+                or type(workers) is not int or not 1<=workers<=16):
+            raise ValueError('Read cache requires 1–4096 MiB blocks, 2–16 slots, and 1–16 download workers')
+        request.update(read_cache_dir=str(cache),read_cache_mb=mb,read_cache_slots=slots,
+                       read_cache_workers=workers)
     for key in ("skip_drift_correction", "no_fast_int16"):
         request[key] = bool(data.get(key, False))
     if data.get("lfp_output"):
@@ -499,7 +509,7 @@ class JobManager:
                        "backend": request.get("backend", "auto"),
                        "skip_drift_correction": request.get("skip_drift_correction", False),
                        "no_fast_int16": request.get("no_fast_int16", False)}
-            for key in ("read_cache_dir", "read_cache_mb", "read_cache_slots"):
+            for key in ("read_cache_dir", "read_cache_mb", "read_cache_slots", "read_cache_workers"):
                 if key in request:
                     payload[key] = request[key]
             if request.get("stage_dir"):
@@ -703,6 +713,9 @@ def create_handler(manager: JobManager, token: str | None = None):
                     self._json(200, dict(manager.metrics))
                 elif split.path == "/api/settings":
                     self._json(200, manager.settings())
+                elif split.path == "/api/runtime":
+                    self._json(200, {"platform": sys.platform,
+                                     "read_cache_default_dir": r"F:\TeraSortReadCache" if sys.platform == "win32" else ""})
                 elif split.path == "/api/browse":
                     query = parse_qs(split.query)
                     self._json(200, browse(query.get("path", [None])[0], query.get("kind", ["all"])[0]))

@@ -163,7 +163,8 @@ class Int16Reader:
 
 
 @contextmanager
-def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=4096, read_cache_slots=2):
+def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=4096,
+                        read_cache_slots=2, read_cache_workers=4):
     from kilosort import io
     if importlib.metadata.version('kilosort') != '4.1.7':
         raise RuntimeError('INT16 adapter validated only against Kilosort 4.1.7')
@@ -175,7 +176,8 @@ def native_int16_reader(filename, *, read_cache_dir=None, read_cache_mb=4096, re
     cache = None
     if read_cache_dir is not None:
         from .read_cache import ReadAheadCache
-        cache = ReadAheadCache(read_cache_dir, block_mb=read_cache_mb, slots=read_cache_slots)
+        cache = ReadAheadCache(read_cache_dir, block_mb=read_cache_mb,
+                               slots=read_cache_slots, workers=read_cache_workers)
     try:
         backend = Int16Reader(cache)
     except BaseException:
