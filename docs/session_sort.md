@@ -292,6 +292,22 @@ used by both CPU and CUDA matching, while rescue remains CUDA-only.
 These bounded settings and the updated algorithm version are recorded in
 the run configuration, so older checkpoints require a new output directory.
 
+An opt-in adaptive timing search can pilot one extra sample, then retain the
+wider radius only for templates with repeated boundary fits:
+
+```powershell
+terasort session-sort --manifest C:\data\session.json --output-root F:\sorts\adaptive-radius-1 --freeze-templates --shift-radius 2 --adaptive-shift-radius
+```
+
+The pilot lasts 30 seconds, requires at least 20 accepted fits per template,
+and expands a template's radius when at least 5% of its pilot fits land on the
+expanded boundary. It currently requires CUDA, a base radius below 8, and
+`--refit-rounds 0`. The radius vector and pilot statistics are checkpointed
+with each immutable shard for deterministic restart. Keep this experimental
+option off by default: it improved the measured single-recording control, but
+has not passed multi-recording ground-truth gates. See the
+[adaptive timing evidence](evidence/session_adaptive_shift_radius_20260926.md).
+
 An experimental higher-compute setting is:
 
 ```powershell

@@ -278,7 +278,7 @@ class ShardWriter:
                 self.cached_bytes += len(selected) * row_bytes
         self.handle.flush()
 
-    def finish(self, models, *, telemetry=None):
+    def finish(self, models, *, telemetry=None, adaptive_shift=None):
         group = self.handle.create_group("model_after")
         group.create_dataset("waveforms", data=models.waveforms,
                              compression="lzf")
@@ -286,6 +286,8 @@ class ShardWriter:
         group.create_dataset("anchors", data=models.anchors)
         group.create_dataset("assigned", data=models.assigned)
         group.attrs["version"] = models.version
+        if adaptive_shift is not None:
+            adaptive_shift.save(self.handle.create_group("adaptive_shift"))
         if telemetry is not None:
             self.handle.attrs["telemetry_json"] = json.dumps(
                 telemetry, sort_keys=True)

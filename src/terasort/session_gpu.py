@@ -127,6 +127,19 @@ class CudaResidualMatcher:
                shift_radius=2, score_floor=.65, amplitude_min=.3, amplitude_max=3.):
         cp = self.cp
         self._refresh()
+        radius_values = np.asarray(shift_radius)
+        if radius_values.ndim == 0:
+            if (not np.issubdtype(radius_values.dtype, np.integer)
+                    or not 0 <= int(radius_values) <= 8):
+                raise ValueError('Timing search radius must be an integer from 0 to 8')
+            device_radii = cp.full(len(self.models.waveforms), int(radius_values),
+                                   dtype=cp.int32)
+        else:
+            if (radius_values.shape != (len(self.models.waveforms),)
+                    or not np.issubdtype(radius_values.dtype, np.integer)
+                    or np.any((radius_values < 0) | (radius_values > 8))):
+                raise ValueError('Per-unit timing radii must match model count and be from 0 to 8')
+            device_radii = cp.asarray(radius_values, dtype=cp.int32)
         pair_event, pair_unit = [], []
         nt = len(residual)
         for i, (t, channel, _) in enumerate(events):
@@ -161,7 +174,7 @@ class CudaResidualMatcher:
                 (residual, events_t, self.templates, self.channels,
                  pe, pu, weights, np.int32(n), np.int32(nt),
                  np.int32(residual.shape[1]), np.int32(width),
-                 np.int32(half_width), np.int32(shift_radius),
+                 np.int32(half_width), device_radii,
                  np.float32(score_floor), np.float32(amplitude_min),
                  np.float32(amplitude_max), ds, da, dg, dt))
             scores[start:stop] = cp.asnumpy(ds)
@@ -208,8 +221,15 @@ class CudaResidualMatcher:
         cp = self.cp
         if not isinstance(half_width, int) or not 3 <= half_width <= 30:
             raise ValueError('Scoring half width must be 3–30 samples')
-        if (not isinstance(shift_radius, int) or not 0 <= shift_radius <= 8
-                or not isinstance(rescue_passes, int) or not 1 <= rescue_passes <= 4):
+        radius_values = np.asarray(shift_radius)
+        valid_radius = (
+            np.issubdtype(radius_values.dtype, np.integer) and
+            ((radius_values.ndim == 0 and 0 <= int(radius_values) <= 8) or
+             (radius_values.shape == (len(self.models.waveforms),) and
+              np.all((radius_values >= 0) & (radius_values <= 8))))
+        )
+        if (not valid_radius or not isinstance(rescue_passes, int)
+                or not 1 <= rescue_passes <= 4):
             raise ValueError('Timing radius must be 0–8 and rescue passes 1–4')
         if overlap_policy not in ('strict', 'interference'):
             raise ValueError('Unknown overlap policy')

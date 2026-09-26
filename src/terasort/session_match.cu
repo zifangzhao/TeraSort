@@ -107,7 +107,8 @@ extern "C" __global__ void score_residual_pairs(
     const int* __restrict__ pair_event, const int* __restrict__ pair_unit,
     const float* __restrict__ noise_weight,
     int n_pairs, int n_samples, int n_channels, int width, int half_width,
-    int shift_radius, float score_floor, float amplitude_min, float amplitude_max,
+    const int* __restrict__ shift_radii,
+    float score_floor, float amplitude_min, float amplitude_max,
     float* __restrict__ scores, float* __restrict__ amplitudes,
     float* __restrict__ gains, int* __restrict__ shifts)
 {
@@ -115,6 +116,7 @@ extern "C" __global__ void score_residual_pairs(
     const int lane = threadIdx.x % 32;
     if (p >= n_pairs) return;
     const int event = pair_event[p], unit = pair_unit[p];
+    const int shift_radius = shift_radii[unit];
     const int center = event_time[event];
     const int channel = lane < width ? channels[unit * width + lane] : -1;
     const float* model = templates + unit * 61 * width;

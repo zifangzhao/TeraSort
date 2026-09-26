@@ -48,6 +48,27 @@ def test_cuda_scores_match_cpu_for_partial_warp_batch(gpu):
                                    [score, amplitude, gain], rtol=2e-5, atol=2e-5)
 
 
+def test_cuda_per_unit_timing_radii_extend_only_selected_template(gpu):
+    cp, matcher_type = gpu
+    models = model_fixture()
+    voltage = np.zeros((240, 2), np.float32)
+    # The event is three samples to the right of its detected candidate.
+    for slot, channel in enumerate(models.channels[1]):
+        if channel >= 0:
+            voltage[73:134, channel] += models.waveforms[1, :, slot]
+    matcher = matcher_type(models)
+    choice = matcher._score(
+        cp.asarray(voltage), [(100, 0, 12.)], shift_radius=np.array([0, 3]),
+        score_floor=.85)[0]
+    assert choice is not None
+    assert choice[2] == 1
+    assert choice[5] == 3
+
+    with pytest.raises(ValueError, match="Per-unit timing radii"):
+        matcher._score(cp.asarray(voltage), [(100, 0, 12.)],
+                       shift_radius=np.array([0, 9]))
+
+
 def test_cuda_residual_recovers_overlapping_contact_support(gpu):
     cp, matcher_type = gpu
     models = model_fixture()
@@ -64,9 +85,11 @@ def test_cuda_residual_recovers_overlapping_contact_support(gpu):
 
 @pytest.mark.parametrize('overlap_policy', ['strict','interference'])
 @pytest.mark.parametrize('rescue_floor_snr,rescue_passes,shift_radius,detector_mode',
-                         [(None,1,2,'raw'),(3.5,1,2,'raw'),(3.5,3,4,'raw'),(3.5,1,2,'smooth3')])
-@pytest.mark.parametrize('refit_rounds', [0,1])
-def test_cuda_checkpoint_resume_preserves_exact_events(gpu, tmp_path, overlap_policy, rescue_floor_snr, rescue_passes, shift_radius, detector_mode, refit_rounds):
+                         [(None,1,2,'raw'),(3.5,1,2,'raw'),
+                          (3.5,3,4,'raw'),(3.5,1,2,'smooth3')])
+@pytest.mark.parametrize('refit_rounds,adaptive_shift',
+                         [(0,False),(1,False),(0,True)])
+def test_cuda_checkpoint_resume_preserves_exact_events(gpu, tmp_path, overlap_policy, rescue_floor_snr, rescue_passes, shift_radius, detector_mode, adaptive_shift, refit_rounds):
     from terasort.session_manifest import load_session
     from terasort.session_signal import iter_cores, preprocess
     from terasort.session_sort import run_session
@@ -93,7 +116,8 @@ def test_cuda_checkpoint_resume_preserves_exact_events(gpu, tmp_path, overlap_po
     manifest.write_text(json.dumps(definition))
     settings = dict(backend="cuda", core_seconds=.025, shard_seconds=.05,
                     overlap_policy=overlap_policy, rescue_floor_snr=rescue_floor_snr,
-                    rescue_passes=rescue_passes, shift_radius=shift_radius)
+                    rescue_passes=rescue_passes, shift_radius=shift_radius,
+                    adaptive_shift_radius=adaptive_shift)
     settings['refit_rounds'] = refit_rounds
     settings['detector_mode'] = detector_mode
     interrupted, fresh = tmp_path / "interrupted", tmp_path / "fresh"
@@ -115,6 +139,10 @@ def test_cuda_checkpoint_resume_preserves_exact_events(gpu, tmp_path, overlap_po
             for key in ("candidates", "spikes", "model_after/waveforms",
                         "adaptation/last_promotion"):
                 np.testing.assert_array_equal(a[key][:], b[key][:])
+            if adaptive_shift:
+                for key in ("adaptive_shift/observations",
+                            "adaptive_shift/boundary_fits", "adaptive_shift/radii"):
+                    np.testing.assert_array_equal(a[key][:], b[key][:])
             total_spikes += len(a["spikes"])
     assert total_spikes == 3
 

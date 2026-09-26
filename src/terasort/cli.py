@@ -47,6 +47,8 @@ def main(argv=None):
     session.add_argument('--rescue-passes', type=int, default=1)
     session.add_argument('--shift-radius', type=int, default=2,
                          help='Candidate timing search radius in samples (0–8)')
+    session.add_argument('--adaptive-shift-radius', action='store_true',
+                         help='Pilot one wider timing search, then expand it only for units with boundary fits')
     session.add_argument("--score-floor", type=float, default=.65)
     session.add_argument('--half-width', type=int, default=8,
                          help='Scoring half width in samples (3–30)')
@@ -130,6 +132,7 @@ def main(argv=None):
             detector_mode=args.detector_mode,
             rescue_floor_snr=args.rescue_floor_snr,
             rescue_passes=args.rescue_passes, shift_radius=args.shift_radius,
+            adaptive_shift_radius=args.adaptive_shift_radius,
             min_margin=args.min_margin, cache_fraction=args.cache_fraction,
             max_candidates=args.max_candidates,
             start_sample=args.start_sample, stop_sample=args.stop_sample,

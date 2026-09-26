@@ -23,6 +23,7 @@ from .session_novelty import NoveltyBank
 from .session_signal import (assess_quality, iter_cores, prefetch_cores,
                              preprocess)
 from .session_store import RunJournal, ShardWriter
+from .session_timing import AdaptiveShiftRadius
 
 
 def _detect_cpu(voltage, noise, floor, *, max_candidates):
@@ -128,7 +129,8 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 progress=None, freeze_templates=False, novelty="off", residual_passes=3,
                 overlap_policy='strict', rescue_floor_snr=None, rescue_passes=1,
                 shift_radius=2, half_width=8, refit_rounds=0, detector_mode='raw',
-                read_buffer_mb=0, prefetch_depth=2):
+                read_buffer_mb=0, prefetch_depth=2,
+                adaptive_shift_radius=False):
     """Process one session into immutable, per-probe time shards.
 
     The existing Kilosort-compatible sorter remains the quality baseline.
@@ -153,6 +155,10 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
     if (not isinstance(shift_radius, int) or not 0 <= shift_radius <= 8
             or not isinstance(rescue_passes, int) or not 1 <= rescue_passes <= 4):
         raise ValueError('Timing radius must be 0–8 and rescue passes 1–4')
+    if (not isinstance(adaptive_shift_radius, bool)
+            or (adaptive_shift_radius and
+                (backend != 'cuda' or shift_radius >= 8 or refit_rounds))):
+        raise ValueError('Adaptive timing radius requires CUDA, radius below 8, and no local refit')
     if rescue_floor_snr is not None and (backend != 'cuda' or
             not np.isfinite(rescue_floor_snr) or not 0 < rescue_floor_snr <= floor_snr):
         raise ValueError('CUDA rescue threshold must be positive and at most primary floor_snr')
@@ -196,6 +202,14 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
         "novelty": novelty,
         "novelty_algorithm": "bounded_temporal_proposals_v1",
     }
+    if adaptive_shift_radius:
+        config["adaptive_shift_radius"] = {
+            "algorithm": "pilot_fit_boundary_fraction_v1",
+            "pilot_seconds": AdaptiveShiftRadius.PILOT_SECONDS,
+            "minimum_observations": AdaptiveShiftRadius.MIN_OBSERVATIONS,
+            "boundary_fraction": AdaptiveShiftRadius.BOUNDARY_FRACTION,
+            "expanded_radius": shift_radius + 1,
+        }
     # Preserve existing default-run checkpoint digests. Nondefault IO settings
     # are immutable for a run, just like the scientific configuration.
     if read_buffer_mb or prefetch_depth != 2:
@@ -223,6 +237,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
         day_id = None
         models = None
         matcher = None
+        adaptive_shift = None
         neighbor_map = geometry_channel_map(
             probe.geometry, probe.shank, 75., 16)
         halo = max(31, int(round(probe.sample_rate_hz * halo_ms / 1000.)))
@@ -235,6 +250,9 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 emit("calibration_start", probe_id=probe.probe_id, day_id=day_id)
                 models = _day_models(probe, day_id, journal.root, resume=resume)
                 evidence = TemplateEvidence(models, probe.sample_rate_hz)
+                adaptive_shift = (AdaptiveShiftRadius(
+                    len(models.waveforms), probe.sample_rate_hz, shift_radius)
+                    if adaptive_shift_radius else None)
                 novel = NoveltyBank(probe.sample_rate_hz) if novelty != 'off' else None
                 if novel is not None and models.waveforms.shape[2] != neighbor_map.shape[1]:
                     raise ValueError('Novelty requires seeds with the session local-channel width')
@@ -252,6 +270,11 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     evidence.restore(handle)
                     if novel is not None:
                         novel.restore(handle)
+                    if adaptive_shift is not None:
+                        if 'adaptive_shift' not in handle:
+                            raise ValueError('Completed shard is missing adaptive timing state')
+                        adaptive_shift.restore(handle['adaptive_shift'],
+                                               len(models.waveforms))
                 if matcher is not None:
                     matcher.models = models
                 continue
@@ -283,6 +306,9 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                                      quality.noise_uv, np.inf).astype(np.float32)
                     local_start = core.core_start - core.data_start
                     local_stop = core.core_stop - core.data_start
+                    core_shift_radius = (
+                        adaptive_shift.for_core(len(models.waveforms))
+                        if adaptive_shift is not None else shift_radius)
                     if matcher is not None:
                         events, matches = matcher.match(
                             signal, noise, floor_snr, core_start=local_start,
@@ -291,7 +317,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                             max_passes=residual_passes,
                             overlap_policy=overlap_policy,
                             rescue_floor_snr=rescue_floor_snr,
-                            rescue_passes=rescue_passes, shift_radius=shift_radius,
+                            rescue_passes=rescue_passes, shift_radius=core_shift_radius,
                             half_width=half_width,
                             detector_mode=detector_mode,
                             refractory_samples=max(2, round(probe.sample_rate_hz*.0005)),
@@ -322,6 +348,17 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                             score_floor=score_floor, min_margin=min_margin,
                             gain_floor=floor_snr**2,
                             refractory_samples=max(2,round(probe.sample_rate_hz*.0005)))
+                    if adaptive_shift is not None:
+                        completed_pilot = adaptive_shift.observe(
+                            matches, core.core_stop-core.core_start,
+                            interval_good=not quality.interval_bad)
+                        if completed_pilot:
+                            emit("adaptive_shift_calibrated", probe_id=probe.probe_id,
+                                 day_id=day_id,
+                                 expanded_units=int(np.sum(
+                                     adaptive_shift.radii > shift_radius)),
+                                 units=len(adaptive_shift.radii),
+                                 pilot_samples=adaptive_shift.pilot_samples)
                     writer.append_core(
                         core=core, voltage_uv=signal, quality=quality,
                         threshold_events=events, matches=matches,
@@ -364,6 +401,8 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     totals['enrolled_units'] += enrolled
                     emit('novelty_complete', probe_id=probe.probe_id, stop_sample=stop,
                          proposals=len(novel_audit), enrolled=enrolled)
+                if adaptive_shift is not None:
+                    adaptive_shift.extend_units(len(models.waveforms))
                 evidence.save(writer.handle, update_audit)
                 promotions = sum(row['promoted'] for row in update_audit)
                 evidence_rows = sum(len(rows) for rows in evidence.rows.values())
@@ -381,7 +420,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     "peak_process_rss_bytes": shard_peak_rss,
                     "peak_gpu_pool_bytes": shard_peak_gpu_pool,
                     "peak_total_vram_used_bytes": shard_peak_total_vram,
-                })
+                }, adaptive_shift=adaptive_shift)
             except BaseException:
                 writer.abort()
                 raise
