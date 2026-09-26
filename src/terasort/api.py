@@ -158,6 +158,11 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                 stack.enter_context(native_int16_reader(filename,read_cache_dir=read_cache_dir,
                     read_cache_mb=read_cache_mb,read_cache_slots=read_cache_slots,
                     read_cache_workers=read_cache_workers))
+        from .kilosort_progress import kilosort_progress
+        stack.enter_context(kilosort_progress(
+            results_dir, skip_drift=(run_settings or {}).get("nblocks", 1) == 0,
+            staging_seconds=staging['total_seconds'] if staging else 0.,
+            lfp=lfp_output is not None))
         if lfp_output is not None:
             if filename is None or isinstance(filename, (list, tuple)) or file_object is not None:
                 raise ValueError("Parallel LFP requires one named INT16 source file")

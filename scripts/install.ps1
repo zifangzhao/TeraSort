@@ -4,11 +4,11 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $venv = Join-Path $root '.venv'
 $venvPython = Join-Path $venv 'Scripts/python.exe'
-$pythonProbe = 'import json,struct,sys; print(json.dumps({"major":sys.version_info.major,"minor":sys.version_info.minor,"bits":struct.calcsize("P")*8}))'
+$environmentCheck = Join-Path $PSScriptRoot 'environment_check.py'
 
 function Get-PythonInfo([string]$Executable, [string[]]$Arguments = @()) {
     try {
-        $output = & $Executable @Arguments -c $pythonProbe 2>$null
+        $output = & $Executable @Arguments $environmentCheck python-info 2>$null
         if ($LASTEXITCODE -ne 0) { return $null }
         return ($output -join "`n" | ConvertFrom-Json)
     } catch {
@@ -166,7 +166,7 @@ if ($LASTEXITCODE -ne 0) { throw 'pip tooling update failed' }
 
 $torchInfo = $null
 try {
-    $torchOutput = & $venvPython -c 'import json,torch; print(json.dumps({"version":torch.__version__.split("+",1)[0],"cuda":torch.version.cuda}))' 2>$null
+    $torchOutput = & $venvPython $environmentCheck torch-info 2>$null
     if ($LASTEXITCODE -eq 0) { $torchInfo = $torchOutput -join "`n" | ConvertFrom-Json }
 } catch { }
 if (-not $torchInfo -or $torchInfo.version -ne '2.10.0' -or $torchInfo.cuda -ne '12.8') {
@@ -182,7 +182,10 @@ Write-Host 'Installing or repairing TeraSort and its required packages...'
 if ($LASTEXITCODE -ne 0) { throw 'TeraSort or one of its required packages could not be installed' }
 & $venvPython -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'Python dependencies remain incompatible after installation' }
-& $venvPython -c 'import cupy as cp,sys,torch,terasort; from terasort.candidates.detectors import CudaDetector; q=cp.zeros((16,2),cp.float32); q[3,0]=5; found=cp.asnumpy(CudaDetector().detect(q,floor=3)); print(terasort.__version__,torch.cuda.is_available(),found.tolist()); sys.exit(0 if torch.cuda.is_available() and found.tolist()==[6] else 1)'
+Write-Host 'Checking three-phase progress hooks...'
+& $venvPython $environmentCheck progress-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Kilosort progress hook check failed' }
+& $venvPython $environmentCheck cuda-smoke
 if ($LASTEXITCODE -ne 0) { throw 'CUDA dependency or kernel check failed' }
 & (Join-Path $venv 'Scripts/terasort.exe') backends
 if ($LASTEXITCODE -ne 0) { throw 'Backend check failed' }

@@ -36,8 +36,8 @@ one with a detected system Python 3.10–3.14, falling back to the bundled Pytho
 3.11 runtime. Detection checks the active `python.exe`, Windows install
 registry, common Conda folders, and the Python launcher. It installs missing
 packages, repairs an incompatible PyTorch build, checks the
-dependency set, then compiles a small CUDA detection kernel and lists available
-sorting backends. To select a specific supported Python executable, pass it
+dependency set and the three-phase progress hooks, then compiles a small
+CUDA detection kernel and lists available sorting backends. To select a specific supported Python executable, pass it
 with `-Python`:
 
 ```powershell
@@ -281,8 +281,12 @@ pieces to disjoint offsets in the same temporary block, keeping Python buffers
 bounded while allowing multiple network reads at once. Set
 `--read-cache-workers` from 1 to 16; compare 2, 4 and 8 on the actual share.
 The job log reports downloaded bytes and recent MiB/s every five seconds.
-Sparse calibration reads fetch only their requested ranges to avoid downloading
-unused gaps. Inputs remain read-only, including across concatenated files.
+Kilosort whitening reads widely spaced batches. After the stride stabilizes,
+the cache prefetches only the next exact batch ranges in parallel, with at
+most four 64 MiB ranges (256 MiB RAM) in flight. It still skips the unused
+gaps, uses the same samples for whitening, and reads inputs without writing
+to them, including across concatenated files. Sparse prefetch is limited
+to the fast INT16 reader with this cache enabled.
 
 This option requires the fast CUDA INT16 reader and cannot be combined with
 full staging. On Linux, select `deep_tiled` to use this cache; `auto` currently
@@ -421,6 +425,19 @@ as a validated hundred-terabyte sorter. See
 [`docs/session_sort.md`](docs/session_sort.md) and
 [`docs/bounded_sorting.md`](docs/bounded_sorting.md).
 
+An optional post-fit identity-linking experiment is available with
+`--template-merge-cosine 0.93 --template-merge-radius-um 32`. It stores a
+per-shard `template_linking/template_to_unit` map; raw `spikes.unit_id` values
+remain unchanged. Set `"resolve_template_links": true` on a benchmark-suite
+case to score the linked identities. The sparse linker compares same-shank
+templates within the requested anchor radius and does not change detection or
+waveforms. On two SpikeInterface synthetic drift recordings, a fixed 0.93/32 µm
+map improved held-out unit-aware F1 from 0.419 to 0.494 and from 0.575 to 0.593;
+the linked routes still recovered only 12/200 and 13/160 units, versus
+Kilosort4's 34/200 and 38/160. The map build took 0.03–0.07 s for 340–610
+templates, excluding sorting. This remains opt-in and unvalidated on public
+in-vivo benchmarks; it is not the default sorter output.
+
 On one 600 s, 384-channel public synthetic recording, the C++/cuBLAS INT16 run
 took 208.186 s against 214.379 s for the fresh `deep_tiled` INT16 control
 (2.9% less worker time). The native run recovered 230/250 ground-truth neurons
@@ -443,3 +460,24 @@ this package is distributed under GPL-3.0-only. See `LICENSE` and the
 source and citation. Benchmark figures are reproduced from the PainProject
 development trials; the packaged entry point and install path are tested
 separately.
+
+
+### Dashboard progress and ETA
+
+New workers publish `terasort_progress.json` atomically in their results folder.
+The dashboard displays three bars: Preprocessing, Sorting, and Post-processing.
+Each phase shows an estimated remaining duration; the main ETA includes all
+remaining phases. Task counters report whitening/detection batches, clustering
+regions, merge candidates, exported feature clusters, and refractory checks.
+Phase percentages and ETAs use stage weights and observed elapsed time, so they
+are estimates, not fractions of bytes or spikes. They can change as the actual
+workload becomes known. Template-learning batch counts are an upper bound because
+learning may stop once enough snippets have been collected. LFP completion is
+included, but its remaining time is unknown while waiting for the separate export.
+
+Counters are scoped to verified Kilosort 4.1.7 functions and preserve numerical
+operations. Unsupported source versions retain stage-level estimates. Workers
+already running before this update cannot gain the new counters retroactively.
+Refresh the page for the three-bar layout; restart the dashboard between runs to
+load the new backend snapshot reader. This update does not push changes or restart
+running jobs automatically.

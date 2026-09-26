@@ -1,14 +1,17 @@
 """Web queue contract and stage estimates, without requiring a GPU."""
 
 import json
+import os
 import threading
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
-from terasort.web import JobManager, _job_log, _progress, browse, create_handler, validate_request
+from terasort.web import (JobManager, _absolute_path, _filesystem_path_error, _job_log, _progress,
+                         browse, create_handler, validate_request)
 
 
 def _request(tmp_path):
@@ -20,6 +23,46 @@ def _request(tmp_path):
     probe.write_text('{"chanMap": [0, 1]}')
     return {"filename": str(raw), "settings": str(settings), "probe_json": str(probe),
             "results_dir": str(tmp_path / "result"), "backend": "auto"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows UNC path behavior")
+def test_absolute_path_preserves_unc_spelling():
+    path = r"\\132.236.112.15\ayadataB2\Data\recording\amplifier.dat"
+    assert str(_absolute_path(path)) == path
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows mapped-drive behavior")
+def test_absolute_path_preserves_mapped_drive_spelling():
+    path = _absolute_path(r"T:\Data\recording\amplifier.dat")
+    assert path.drive.upper() == "T:"
+    assert str(path).startswith("T:\\")
+
+
+def test_network_path_access_error_explains_windows_permissions():
+    path = r"\\132.236.112.15\ayadataB2\Data\recording\amplifier.dat"
+    error = _filesystem_path_error(path, PermissionError(5, "Access is denied"))
+    message = str(error)
+    assert "Access denied" in message
+    assert "Windows account running the dashboard" in message
+    assert "share and folder permissions" in message
+    assert "UNC path may authenticate differently" in message
+    assert "try entering the T:" in message
+
+
+def test_validation_rejects_inaccessible_source_before_queueing(tmp_path, monkeypatch):
+    request = _request(tmp_path)
+    source = Path(request["filename"]).resolve()
+    original_open = Path.open
+
+    def deny_source(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError(5, "Access is denied", str(path))
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", deny_source)
+    with pytest.raises(ValueError, match="Access denied") as error:
+        validate_request(request)
+    assert "Windows account running the dashboard" in str(error.value)
 
 
 def test_validation_protects_input_and_result(tmp_path):
@@ -115,6 +158,8 @@ def test_browse_and_stage_eta(tmp_path):
 def test_http_token_and_persistent_queue(tmp_path, monkeypatch):
     # Keep the scheduler from launching a real Kilosort process in this test.
     monkeypatch.setattr(JobManager, "_launch", lambda self, job: None)
+    opened = []
+    monkeypatch.setattr("terasort.web._open_folder_in_explorer", opened.append)
     manager = JobManager(tmp_path / "state")
     server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(manager, "test-token"))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -131,6 +176,24 @@ def test_http_token_and_persistent_queue(tmp_path, monkeypatch):
             job = json.load(response)
         assert job["status"] == "queued"
         assert (tmp_path / "state" / job["id"] / "job.json").is_file()
+        open_url = base + f"/api/jobs/{job['id']}/open-output"
+        open_payload = json.dumps({"path": str(tmp_path / "wrong-folder")}).encode()
+        with pytest.raises(HTTPError) as denied_open:
+            urlopen(Request(open_url, open_payload, method="POST",
+                            headers={"Content-Type": "application/json"}))
+        assert denied_open.value.code == 401
+        with pytest.raises(HTTPError) as missing_output:
+            urlopen(Request(open_url, open_payload, method="POST",
+                            headers={"Authorization": "Bearer test-token",
+                                     "Content-Type": "application/json"}))
+        assert missing_output.value.code == 400
+        output_path = Path(job["request"]["results_dir"])
+        output_path.mkdir()
+        with urlopen(Request(open_url, open_payload, method="POST",
+                             headers={"Authorization": "Bearer test-token",
+                                      "Content-Type": "application/json"})) as response:
+            assert json.load(response)["path"] == str(output_path)
+        assert opened == [output_path]
         with urlopen(Request(base + "/api/jobs", headers={"Authorization": "Bearer test-token"})) as response:
             assert json.load(response)["jobs"][0]["id"] == job["id"]
         with urlopen(Request(base + "/api/metrics", headers={"Authorization": "Bearer test-token"})) as response:

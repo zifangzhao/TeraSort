@@ -13,11 +13,14 @@ import weakref
 
 import numpy as np
 
+from .cuda_environment import configure_cupy_cache
+
 EXPECTED_SOURCE_SHA256 = '8f47f33479d57f1ce7296964b3e3a81711edb0c1ebc525e912d23e58a0db0a54'
 
 
 class NativeReductions:
     def __init__(self,neighbor_mode='basic',block_size=256,score_block_size=128):
+        configure_cupy_cache()
         import cupy as cp
         self.cp = cp
         source = Path(__file__).with_name('kilosort_reductions.cu').read_text()

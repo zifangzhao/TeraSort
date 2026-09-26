@@ -5,6 +5,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ from terasort.session_calibration import calibrate_day, select_calibration_windo
 from terasort.session_models import LocalModels, match_residual_cpu
 from terasort.session_signal import (Core, QC_ARTIFACT, QC_DROPOUT,
                                      assess_quality, iter_cores, preprocess)
-from terasort.session_sort import run_session
+from terasort.session_sort import run_session, _configure_template_proposals
 from terasort.session_sort import preprocess as original_preprocess
 
 
@@ -76,6 +77,24 @@ class SessionTests(unittest.TestCase):
         data["probes"][0]["seed_preprocessing_id"] = "terasort-session-v1"
         manifest.write_text(json.dumps(data))
         return seed
+
+    def test_template_proposals_are_geometry_local_and_same_shank(self):
+        waveforms = np.zeros((4, 61, 1), np.float32)
+        anchors = np.array([0, 1, 2, 3], np.int32)
+        models = LocalModels(waveforms, anchors[:, None], anchors,
+                             np.zeros(4, np.int64))
+        probe = SimpleNamespace(
+            n_channels=4,
+            geometry=np.array([[0, 0], [20, 0], [49, 0], [0, 0]], np.float64),
+            shank=np.array([0, 0, 0, 1], np.int32))
+
+        largest = _configure_template_proposals(models, probe, 25.)
+
+        self.assertEqual(largest, 2)
+        self.assertEqual(models.by_channel[0], [0, 1])
+        self.assertEqual(models.by_channel[1], [0, 1])
+        self.assertEqual(models.by_channel[2], [2])
+        self.assertEqual(models.by_channel[3], [3])
 
     def test_explicit_gap_and_bounded_reader(self):
         manifest, _ = self.make_source(gap=True)
@@ -214,6 +233,55 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(resumed["shards"], 0)
         self.assertEqual(sizes, [path.stat().st_size for path in shards])
         self.assertEqual(before, hashlib.sha256(source.read_bytes()).hexdigest())
+
+    def test_optional_template_linking_is_reversible_metadata(self):
+        from terasort.session_quality import load_session_spikes
+
+        manifest, _ = self.make_source()
+        self.make_seed(manifest)
+        output = self.root / "linked"
+        run_session(
+            manifest, output, backend="cpu", core_seconds=.1,
+            shard_seconds=.2, floor_snr=4., template_merge_cosine=.93,
+            template_merge_radius_um=32.,
+        )
+        shards = sorted((output / "probeA").glob("*.h5"))
+        self.assertEqual(len(shards), 2)
+        for path in shards:
+            with h5py.File(path, "r") as handle:
+                self.assertIn("template_linking/template_to_unit", handle)
+                np.testing.assert_array_equal(
+                    handle["template_linking/template_to_unit"][:], [0]
+                )
+                self.assertEqual(handle["spikes"].dtype["unit_id"], np.dtype("<i8"))
+        raw_times, raw_labels, _ = load_session_spikes(output, "probeA")
+        merged_times, merged_labels, _ = load_session_spikes(
+            output, "probeA", resolve_template_links=True
+        )
+        np.testing.assert_array_equal(raw_times, merged_times)
+        np.testing.assert_array_equal(raw_labels, merged_labels)
+
+    def test_pre_subtraction_amplitude_floor_is_opt_in_and_recorded(self):
+        manifest, _ = self.make_source()
+        self.make_seed(manifest)
+        output = self.root / "amplitude_floor"
+        settings = dict(backend="cpu", core_seconds=.1, shard_seconds=.2,
+                        floor_snr=4., fit_amplitude_min=.6)
+        with patch("terasort.session_sort.match_residual_cpu",
+                   wraps=match_residual_cpu) as matcher:
+            run_session(manifest, output, **settings)
+        self.assertTrue(matcher.call_args_list)
+        self.assertTrue(all(call.kwargs["amplitude_min"] == .6
+                            for call in matcher.call_args_list))
+        record = json.loads((output / "run.json").read_text())
+        self.assertEqual(record["config"]["pre_subtraction_amplitude_floor"]["minimum"], .6)
+        self.assertEqual(
+            record["config"]["pre_subtraction_amplitude_floor"]["scope"],
+            "matcher_acceptance_and_residual_subtraction")
+        for value in (-.1, 3.01, float("nan"), True):
+            with self.assertRaises(ValueError):
+                run_session(manifest, self.root / f"invalid_{str(value)}",
+                            backend="cpu", fit_amplitude_min=value)
 
     def test_interrupted_shard_reprocesses_without_duplicate_events(self):
         manifest, _ = self.make_source()

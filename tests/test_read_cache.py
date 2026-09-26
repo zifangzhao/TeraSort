@@ -67,3 +67,27 @@ def test_download_failure_never_publishes_partial(tmp_path):
             cache.read(tmp_path/'absent.bin',0,10,sequential=True)
         assert not list(cache.root.glob('*.block'))
     finally: cache.close()
+
+
+def test_sparse_whitening_prefetch_preserves_exact_ranges_and_stays_bounded(tmp_path):
+    payload = np.random.default_rng(123).integers(0, 256, 2*1024**2,
+                                                   dtype=np.uint8).tobytes()
+    source = tmp_path / 'source.bin'
+    source.write_bytes(payload)
+    cache = ReadAheadCache(tmp_path / 'scratch', block_mb=1, slots=2,
+                           workers=4)
+    try:
+        stride, length = 128*1024, 32*1024
+        for index in range(12):
+            start = index*stride
+            assert cache.read(source, start, start+length) == payload[start:start+length]
+            assert len(cache.sparse_futures) <= cache.sparse_depth
+        assert cache.sparse_served_bytes >= length
+        assert cache.stats()['sparse_prefetch_budget_bytes'] == 256*1024**2
+        # A change of access pattern cancels speculative sparse requests.
+        assert cache.read(source, 17, 50) == payload[17:50]
+        assert not cache.sparse_futures
+        assert cache.read(source, 0, 100, sequential=True) == payload[:100]
+    finally:
+        cache.close()
+    assert source.read_bytes() == payload

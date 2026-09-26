@@ -158,10 +158,12 @@ def score_sorting(gt_times, gt_labels, predicted_times, predicted_labels, *,
     }
 
 
-def load_session_spikes(root, probe_id, *, first=0, stop=None):
+def load_session_spikes(root, probe_id, *, first=0, stop=None,
+                        resolve_template_links=False, export_filter=False):
     folder = Path(root) / probe_id
     times, labels = [], []
     spans = []
+    day_link_maps = {}
     for path in sorted(folder.glob("*.h5")):
         with h5py.File(path, "r") as handle:
             if not handle.attrs.get("complete", False):
@@ -172,6 +174,11 @@ def load_session_spikes(root, probe_id, *, first=0, stop=None):
                 continue
             spans.append((max(start, first), min(end, stop) if stop is not None else end))
             spikes = handle["spikes"][:]
+            if export_filter and "spike_export_mask" in handle:
+                export_mask = handle["spike_export_mask"][:]
+                if export_mask.shape != (len(spikes),) or np.any(export_mask > 1):
+                    raise ValueError(f"Invalid spike export mask in shard: {path}")
+                spikes = spikes[export_mask.astype(bool)]
             keep = spikes["sample_index"] >= first
             if stop is not None:
                 keep &= spikes["sample_index"] < stop
@@ -179,8 +186,22 @@ def load_session_spikes(root, probe_id, *, first=0, stop=None):
             times.append(spikes["sample_index"])
             # Day/probe namespace prevents accidental cross-day identity.
             day_id = str(handle.attrs["day_id"])
+            units = spikes["unit_id"]
+            if resolve_template_links:
+                if "template_linking/template_to_unit" not in handle:
+                    raise ValueError(
+                        f"Template links requested but absent from shard: {path}"
+                    )
+                mapping = handle["template_linking/template_to_unit"][:]
+                previous = day_link_maps.get(day_id)
+                if previous is not None and not np.array_equal(previous, mapping):
+                    raise ValueError(f"Inconsistent template map for day {day_id}")
+                day_link_maps[day_id] = mapping
+                if len(units) and (np.any(units < 0) or np.any(units >= len(mapping))):
+                    raise ValueError(f"Shard spike references missing template map entry: {path}")
+                units = mapping[units]
             labels.extend(f"{probe_id}/{day_id}/{int(unit)}"
-                          for unit in spikes["unit_id"])
+                          for unit in units)
     if not spans:
         raise ValueError("No completed session shards in benchmark interval")
     return (np.concatenate(times) if times else np.empty(0, np.int64),
@@ -212,8 +233,12 @@ def evaluate_case(case):
         raise ValueError("Invalid ground-truth bundle")
     tolerance = max(1, round(rate * .0004))
     collision_tolerance = max(1, round(rate * .0006))
+    resolve_template_links = bool(case.get("resolve_template_links", False))
+    export_filter = bool(case.get("export_filter", False))
     pred_t, pred_l, spans = load_session_spikes(
-        case["session_output"], case["probe_id"], first=first, stop=stop)
+        case["session_output"], case["probe_id"], first=first, stop=stop,
+        resolve_template_links=resolve_template_links,
+        export_filter=export_filter)
     keep = _inside_spans(gt_t, spans)
     gt_t, gt_l = gt_t[keep], gt_l[keep]
     ks = Path(case["kilosort_dir"])
@@ -222,6 +247,8 @@ def evaluate_case(case):
     keep = _inside_spans(ks_t, spans)
     result = {
         "name": case["name"], "kind": case["kind"],
+        "template_links_resolved": resolve_template_links,
+        "export_filter_applied": export_filter,
         "tolerance_samples": tolerance,
         "collision_tolerance_samples": collision_tolerance,
         "session": score_sorting(gt_t, gt_l, pred_t, pred_l,

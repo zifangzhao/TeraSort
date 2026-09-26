@@ -78,11 +78,62 @@ waveform scale, and time center.
 The refined matcher uses a central 17-sample cosine proposal, then fits the
 amplitude against all 61 samples with inverse-noise-variance channel weights.
 It searches shifts of up to two samples and ranks eligible proposals by
-residual energy reduction. Ambiguity is the relative gain margin between
-the best two eligible templates. A 0.5 ms same-unit exclusion reduces
-duplicate assignments. Seed peaks and dominant contacts are canonicalized
-without merging unit IDs. Candidate coordinates retain the original
+residual energy reduction. Without template links, ambiguity is the relative
+gain margin between the best two eligible templates. When template links are
+enabled, alternate waveform templates mapped to the same linked identity are
+collapsed to their best fit before computing the margin against the next
+distinct identity. This prevents two representations of one seed unit from
+being treated as competing neurons. A 0.5 ms same-unit exclusion reduces
+duplicate assignments. In CUDA strict mode, fits whose templates share
+contacts are also excluded within a 61-sample waveform window by default.
+The experimental --overlap-window-samples option shortens that contact-based
+exclusion (for example, 16 samples) and colors subtractions into separate
+launches when templates overlap, preserving deterministic residual updates. It
+may recover close or colliding spikes while increasing false assignments; keep
+the default until calibration and held-out recordings show a consistent gain.
+CUDA progress events and shard telemetry report per-pass candidate counts,
+local-template proposals and pairs, eligible fits, gain/margin rejections,
+refractory and contact-overlap rejections, and accepted fits. This option
+is unavailable with CPU or interference mode. Seed peaks and
+dominant contacts are canonicalized without merging unit IDs. Candidate
+coordinates retain the original
 detection position; fitted spike coordinates may shift by two samples.
+
+`--fit-amplitude-min` raises the fitted template-scale amplitude floor used
+while accepting matches and subtracting them from the residual. The existing
+floor is 0.3; a larger value can improve precision while losing weak spikes and
+changing later residual proposals. It is included in the immutable run
+configuration. Select it on calibration data and evaluate it on held-out data.
+For a separate offline comparison, `--export-amplitude-min` writes a compact
+row-aligned mask at shard finalization. It preserves every spike and candidate
+row; the quality-suite case option `"export_filter": true` applies that view.
+
+A calibration-only sweep on one synthetic NP1 drift recording selected
+fit amplitude minimum 0.7: calibration F1 rose from 0.4999 to 0.5170 and
+recovered units from 9 to 12. On its untouched 120–150 s interval, F1 rose
+from 0.5204 to 0.5304 and recovered units from 14 to 18. The dense 90–150 s
+pass took 32.4 seconds at the previous floor and 33.1 seconds at 0.7.
+
+On the same pooled Kilosort-seeded bank, identity-aware margins with static
+cosine links raised held-out F1 from 0.5304 to 0.5575 and recovered units from
+18 to 24 at the existing 0.03 margin. Runtime changed from 33.1 to 34.2
+seconds, process RSS from 608 to 616 MB, and device-wide VRAM stayed at
+1.30 GB. A calibration-only sweep selected margin 0.00 (calibration F1
+0.5345 vs 0.5276 at 0.03); its held-out result was F1 0.5610 with 25 units.
+Kilosort4 scored F1 0.5290 and recovered 34 units on this interval, so TeraSort
+currently has higher spike F1 but still recovers fewer units. A larger
+time-window template bank did not improve this dataset. These are results from
+one synthetic NP1 benchmark, not a general quality guarantee; the public
+margin default remains 0.03 until this is checked on additional drift and
+collision recordings. Other probes, rare units, and long recordings remain
+to be evaluated; this route is not replacement-ready.
+
+Each event proposes only templates whose anchor is on the same shank and
+within 48 µm by default. Set `--template-proposal-radius-um` to tune this
+locality for the probe geometry. The radius is recorded in the immutable
+run configuration and therefore cannot change across a resume. CUDA runs
+fail early if a channel would see more than 512 templates, instead of
+failing later after allocating an oversized event/template-pair array.
 The dense pass still uses direct CUDA kernels, bounded local pair batches,
 two-second cores, residual subtraction, and the existing shard checkpoints.
 Detection now fuses absolute-value normalization, temporal peak checks and

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import threading
@@ -128,18 +129,95 @@ def _drives() -> list[dict]:
     return [{"name": "/", "path": "/", "kind": "drive"}]
 
 
+def _filesystem_path_error(path: str | Path, exc: OSError) -> ValueError:
+    """Explain common Windows share and mapped-drive failures to dashboard users."""
+    code = getattr(exc, "winerror", None)
+    if isinstance(exc, PermissionError) or code == 5:
+        message = (
+            f"Access denied to path '{path}'. TeraSort needs read access to the file "
+            f"and list access to its parent folders under the Windows account running "
+            f"the dashboard. For an SMB share, check both share and folder permissions. "
+            f"A mapped drive must be connected in the same login session as TeraSort; "
+            f"a UNC path may authenticate differently from a mapped drive. If the share "
+            f"opens in File Explorer as T:, try entering the T:\\ path directly. "
+            f"Windows reported: {exc}"
+        )
+    elif isinstance(exc, (FileNotFoundError, NotADirectoryError)) or code in (2, 3):
+        message = (
+            f"Path not found or unavailable to TeraSort: '{path}'. Confirm the exact "
+            f"file or folder and the network connection. Mapped drives are session-specific; "
+            f"for network storage, enter the share UNC path. "
+            f"Windows reported: {exc}"
+        )
+    else:
+        message = f"Could not access path '{path}': {exc}"
+    return ValueError(message)
+
+
+def _absolute_path(path: str | Path) -> Path:
+    """Make a path absolute without rewriting mapped-drive paths to UNC."""
+    return Path(path).expanduser().absolute()
+
+
+def _canonical_path(path: str | Path) -> Path:
+    """Resolve aliases for comparisons only; never store this as the I/O path."""
+    candidate = _absolute_path(path)
+    try:
+        return candidate.resolve()
+    except OSError:
+        return candidate
+
+
+def _path_identity(path: str | Path) -> str:
+    return os.path.normcase(str(_canonical_path(path)))
+
+
+def _paths_overlap(first: str | Path, second: str | Path) -> bool:
+    left, right = _canonical_path(first), _canonical_path(second)
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
+
+
+def _is_relative_to(path: str | Path, parent: str | Path) -> bool:
+    return _canonical_path(path).is_relative_to(_canonical_path(parent))
+
+
+def _existing_path(path: str | Path) -> tuple[Path, os.stat_result]:
+    try:
+        absolute = _absolute_path(path)
+        info = absolute.stat()
+    except OSError as exc:
+        raise _filesystem_path_error(path, exc) from exc
+    return absolute, info
+
+
+def _open_folder_in_explorer(path: Path) -> None:
+    if sys.platform != "win32":
+        raise ValueError("Opening output folders in Explorer requires a Windows dashboard")
+    try:
+        os.startfile(str(path))
+    except OSError as exc:
+        raise _filesystem_path_error(path, exc) from exc
+
+
 def browse(path: str | None, kinds: str = "all") -> dict:
     if not path:
         return {"path": None, "parent": None, "entries": _drives()}
-    directory = Path(path).expanduser().resolve(strict=True)
-    if not directory.is_dir():
+    directory, info = _existing_path(path)
+    if not stat.S_ISDIR(info.st_mode):
         raise ValueError("Selected path is not a directory")
+
+    def iter_children():
+        try:
+            yield from directory.iterdir()
+        except OSError as exc:
+            raise _filesystem_path_error(path, exc) from exc
+
     entries = []
     truncated = False
     extensions = {"recordings": {".dat", ".bin"},
                   "intan": {".dat"},
                   "neuropixels": {".dat", ".bin"}}.get(kinds)
-    for child in directory.iterdir():
+    for child in iter_children():
         try:
             if child.is_dir():
                 entries.append({"name": child.name, "path": str(child), "kind": "directory"})
@@ -161,8 +239,8 @@ def browse(path: str | None, kinds: str = "all") -> dict:
 
 def find_dat_files_recursive(path: str) -> dict:
     """List .dat recordings under a selected folder in natural path order."""
-    directory = Path(path).expanduser().resolve(strict=True)
-    if not directory.is_dir():
+    directory, info = _existing_path(path)
+    if not stat.S_ISDIR(info.st_mode):
         raise ValueError("Selected path is not a directory")
 
     inaccessible = 0
@@ -190,8 +268,8 @@ def _natural_path_key(value: str) -> tuple:
 
 def recording_info(path: str, reserved_outputs: set[str] | None = None) -> dict:
     """Find a valid adjacent Neuroscope XML and a safe output folder suggestion."""
-    source = Path(path).expanduser().resolve(strict=True)
-    if not source.is_file() or source.suffix.lower() not in {".dat", ".bin"}:
+    source, info = _existing_path(path)
+    if not stat.S_ISREG(info.st_mode) or source.suffix.lower() not in {".dat", ".bin"}:
         raise ValueError("Choose a raw INT16 .dat or .bin recording")
     xml_path = None
     candidates = (source.with_suffix(".xml"), source.parent / "amplifier.xml")
@@ -207,20 +285,20 @@ def recording_info(path: str, reserved_outputs: set[str] | None = None) -> dict:
                 read_xml(candidate)
             except (OSError, ValueError):
                 continue
-            xml_path = str(candidate.resolve())
+            xml_path = str(candidate.absolute())
             break
-    reserved = {os.path.normcase(str(Path(p).resolve())) for p in (reserved_outputs or set())}
+    reserved = {_path_identity(p) for p in (reserved_outputs or set())}
     base = f"{source.stem[:160]}_terasort"
     index = 1
     while True:
         name = base if index == 1 else f"{base}_{index:02d}"
         output = source.parent / name
-        output_key = os.path.normcase(str(output.resolve()))
+        output_key = _path_identity(output)
         occupied = output.exists() and (not output.is_dir() or any(output.iterdir()))
         if output_key not in reserved and not occupied:
             break
         index += 1
-    return {"source": str(source), "xml_path": xml_path, "results_dir": str(output.resolve())}
+    return {"source": str(source), "xml_path": xml_path, "results_dir": str(output.absolute())}
 
 
 def validate_request(data: dict, existing_outputs: set[str] | None = None) -> dict:
@@ -233,12 +311,19 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     if not isinstance(names, list) or not names or any(not isinstance(n, str) or not n.strip() for n in names):
         raise ValueError("At least one filename is required")
     paths = []
+    source_sizes = []
     for name in names:
-        path = Path(name).expanduser().resolve(strict=True)
-        if not path.is_file():
+        path, info = _existing_path(name)
+        if not stat.S_ISREG(info.st_mode):
             raise ValueError("Each filename must be a file")
+        try:
+            with path.open("rb") as stream:
+                stream.read(1)
+        except OSError as exc:
+            raise _filesystem_path_error(name, exc) from exc
         paths.append(str(path))
-    if len({os.path.normcase(p) for p in paths}) != len(paths):
+        source_sizes.append(info.st_size)
+    if len({_path_identity(p) for p in paths}) != len(paths):
         raise ValueError("The same input file was selected more than once")
     request["filename"] = paths[0]
     request["filenames"] = paths
@@ -254,15 +339,14 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         value = data.get("settings")
         if not isinstance(value, str) or not value.strip():
             raise ValueError("settings or neuroscope_xml is required")
-        settings_path = Path(value).expanduser().resolve(strict=True)
+        settings_path = _absolute_path(value)
         if not settings_path.is_file():
             raise ValueError("settings must be a file")
         request["settings"] = str(settings_path)
         settings = json.loads(Path(request["settings"]).read_text(encoding="utf-8"))
     if not isinstance(settings, dict) or type(settings.get("n_chan_bin")) is not int or settings["n_chan_bin"] <= 0:
         raise ValueError("Settings must contain a positive integer n_chan_bin")
-    for path in paths:
-        source_bytes = Path(path).stat().st_size
+    for path, source_bytes in zip(paths, source_sizes):
         if not source_bytes or source_bytes % (2 * settings["n_chan_bin"]):
             raise ValueError(f"INT16 recording is empty or size is not divisible by n_chan_bin: {path}")
     if len(paths) > 1 and (not isinstance(settings.get("fs"), (int, float)) or settings["fs"] <= 0):
@@ -270,25 +354,25 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     output = data.get("results_dir")
     if not isinstance(output, str) or not output.strip():
         raise ValueError("results_dir is required")
-    output_path = Path(output).expanduser().resolve()
+    output_path = _absolute_path(output)
     if output_path.exists() and not output_path.is_dir():
         raise ValueError("Results path must be a directory")
     if output_path.exists() and any(output_path.iterdir()):
         raise ValueError("Results directory must be empty; choose a new directory")
-    if existing_outputs and os.path.normcase(str(output_path)) in {os.path.normcase(p) for p in existing_outputs}:
+    if existing_outputs and _path_identity(output_path) in {_path_identity(p) for p in existing_outputs}:
         raise ValueError("Another job already uses this results directory")
     request["results_dir"] = str(output_path)
     if data.get("stage_dir"):
         if not isinstance(data["stage_dir"], str):
             raise ValueError("stage_dir must be a path")
-        stage_path = Path(data["stage_dir"]).expanduser().resolve()
+        stage_path = _absolute_path(data["stage_dir"])
         if stage_path.exists():
             raise ValueError("Staging directory must be new")
-        if existing_outputs and os.path.normcase(str(stage_path)) in {os.path.normcase(p) for p in existing_outputs}:
+        if existing_outputs and _path_identity(stage_path) in {_path_identity(p) for p in existing_outputs}:
             raise ValueError("Another job already uses this staging directory")
-        if stage_path.is_relative_to(output_path) or output_path.is_relative_to(stage_path):
+        if _paths_overlap(stage_path, output_path):
             raise ValueError("Staging and results directories must be separate")
-        if any(stage_path.is_relative_to(Path(path).parent) for path in paths):
+        if any(_is_relative_to(stage_path, Path(path).parent) for path in paths):
             raise ValueError("Staging directory must be outside input folders")
         request["stage_dir"] = str(stage_path)
     probe_json = data.get("probe_json")
@@ -297,7 +381,7 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
     if not auto_xml_probe and bool(probe_json) == bool(probe_name):
         raise ValueError("Select exactly one probe JSON or bundled probe name")
     if probe_json:
-        probe_path = Path(probe_json).expanduser().resolve(strict=True)
+        probe_path = _absolute_path(probe_json)
         if not probe_path.is_file() or not isinstance(json.loads(probe_path.read_text(encoding="utf-8")), dict):
             raise ValueError("probe_json must contain a JSON object")
         request["probe_json"] = str(probe_path)
@@ -321,7 +405,7 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
         raise ValueError("Invalid backend")
     request["backend"] = backend
     if data.get("read_cache_dir"):
-        cache = Path(data["read_cache_dir"]).expanduser().resolve()
+        cache = _absolute_path(data["read_cache_dir"])
         if data.get("stage_dir") or backend == "standard" or data.get("no_fast_int16"):
             raise ValueError('Read cache needs fast INT16 mode and cannot combine with full staging')
         from .api import _select_backend
@@ -331,9 +415,9 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
             raise ValueError(str(exc)) from exc
         if cache_backend == "standard":
             raise ValueError('Read cache needs the cublas or deep_tiled backend; auto selected standard Kilosort')
-        if any(cache.is_relative_to(Path(p).parent) for p in paths):
+        if any(_is_relative_to(cache, Path(p).parent) for p in paths):
             raise ValueError('Read cache must be outside source folders')
-        if cache.is_relative_to(output_path) or output_path.is_relative_to(cache):
+        if _paths_overlap(cache, output_path):
             raise ValueError('Read cache and results must be separate')
         mb,slots = data.get("read_cache_mb",4096),data.get("read_cache_slots",2)
         workers = data.get("read_cache_workers",4)
@@ -349,10 +433,10 @@ def validate_request(data: dict, existing_outputs: set[str] | None = None) -> di
             raise ValueError("Specify gain in microvolts per count for XML-configured LFP export")
         if len(paths) > 1:
             raise ValueError("Parallel LFP output currently supports one source file per run")
-        lfp_path = Path(data["lfp_output"]).expanduser().resolve()
+        lfp_path = _absolute_path(data["lfp_output"])
         if lfp_path.exists():
             raise ValueError("LFP output already exists")
-        if lfp_path in map(Path, paths):
+        if any(_path_identity(lfp_path) == _path_identity(path) for path in paths):
             raise ValueError("LFP output cannot overwrite the input")
         request["lfp_output"] = str(lfp_path)
     return request
@@ -442,9 +526,9 @@ class JobManager:
 
     def add(self, data: dict) -> dict:
         with self.lock:
-            outputs = {os.path.normcase(job["request"]["results_dir"]) for job in self.jobs.values()
+            outputs = {_path_identity(job["request"]["results_dir"]) for job in self.jobs.values()
                        if job["status"] in ("queued", "running")}
-            outputs.update(os.path.normcase(job["request"]["stage_dir"])
+            outputs.update(_path_identity(job["request"]["stage_dir"])
                            for job in self.jobs.values()
                            if job["status"] in ("queued", "running") and job["request"].get("stage_dir"))
             request = validate_request(data, outputs)
@@ -467,14 +551,14 @@ class JobManager:
 
     @staticmethod
     def _retry_path(original: str, reserved: set[str], *, file_path: bool = False) -> str:
-        path = Path(original).expanduser().resolve()
+        path = _absolute_path(original)
         for attempt in range(1, 10000):
             suffix = "_retry" if attempt == 1 else f"_retry_{attempt:02d}"
             if file_path:
                 candidate = path.with_name(f"{path.stem}{suffix}{path.suffix}")
             else:
                 candidate = path.with_name(f"{path.name}{suffix}")
-            key = os.path.normcase(str(candidate.resolve()))
+            key = _path_identity(candidate)
             if key not in reserved and not candidate.exists():
                 return str(candidate)
         raise ValueError("Could not find an unused retry output path")
@@ -498,7 +582,7 @@ class JobManager:
                 for key in ("results_dir", "stage_dir", "lfp_output"):
                     value = job["request"].get(key)
                     if value:
-                        reserved.add(os.path.normcase(str(Path(value).expanduser().resolve())))
+                        reserved.add(_path_identity(value))
 
             results_dir = self._retry_path(request["results_dir"], reserved)
             payload = {"filenames": request.get("filenames", [request["filename"]]),
@@ -515,8 +599,8 @@ class JobManager:
             if request.get("stage_dir"):
                 payload["stage_dir"] = self._retry_path(request["stage_dir"], reserved)
             if request.get("lfp_output"):
-                old_output = Path(request["lfp_output"]).expanduser().resolve()
-                old_results = Path(request["results_dir"]).expanduser().resolve()
+                old_output = _absolute_path(request["lfp_output"])
+                old_results = _absolute_path(request["results_dir"])
                 try:
                     relative_output = old_output.relative_to(old_results)
                 except ValueError:
@@ -554,12 +638,23 @@ class JobManager:
                 self._save(job)
             return self.view(job_id, include_log=False)
 
+    def open_output(self, job_id: str) -> dict:
+        with self.lock:
+            requested = self.jobs[job_id]["request"]["results_dir"]
+        path, info = _existing_path(requested)
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("Results path is not a folder")
+        _open_folder_in_explorer(path)
+        return {"path": str(path)}
+
     def view(self, job_id: str, include_log: bool = True) -> dict:
         with self.lock:
             job = dict(self.jobs[job_id])
             log = _job_log(job, self.state_dir)
             elapsed = (job.get("finished_at") or time.time()) - (job.get("started_at") or time.time())
             job.update(_progress(log, elapsed, job["status"], bool(job["request"].get("stage_dir"))))
+            from .job_progress import apply_progress_snapshot
+            apply_progress_snapshot(job, Path(job["request"]["results_dir"]) / "terasort_progress.json")
             job["created_at"] = _iso(job["created_at"])
             job["started_at"] = _iso(job.get("started_at"))
             job["finished_at"] = _iso(job.get("finished_at"))
@@ -760,6 +855,8 @@ def create_handler(manager: JobManager, token: str | None = None):
                     self._json(201, manager.add(data))
                 elif self.path == "/api/settings":
                     self._json(200, manager.update_settings(data))
+                elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/open-output", self.path):
+                    self._json(200, manager.open_output(self.path.split("/")[3]))
                 elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/retry", self.path):
                     self._json(201, manager.retry(self.path.split("/")[3]))
                 elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}/cancel", self.path):

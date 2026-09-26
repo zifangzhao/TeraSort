@@ -188,13 +188,47 @@ class Match:
     relative_margin: float = 1.
 
 
+def normalize_template_identity_map(identity_map, n_templates):
+    if identity_map is None:
+        return None
+    raw = np.asarray(identity_map)
+    if (raw.ndim != 1 or not np.issubdtype(raw.dtype, np.integer)
+            or np.issubdtype(raw.dtype, np.bool_)
+            or np.any(raw < 0) or len(raw) > n_templates):
+        raise ValueError("Invalid template identity map")
+    result = raw.astype(np.int64, copy=False)
+    if len(result) < n_templates:
+        first_new = int(result.max()) + 1 if len(result) else 0
+        result = np.concatenate((
+            result,
+            np.arange(first_new, first_new + n_templates - len(result),
+                      dtype=np.int64),
+        ))
+    return result
+
+
+def collapse_identity_scores(scored, identity_map):
+    """Keep one best waveform representation per stable unit identity."""
+    if identity_map is None:
+        return list(scored)
+    best = {}
+    for row in scored:
+        gain, score, template_id = row[:3]
+        identity = int(identity_map[template_id])
+        previous = best.get(identity)
+        if previous is None or row > previous:
+            best[identity] = row
+    return list(best.values())
+
+
 def match_residual_cpu(residual, events, models: LocalModels, *,
                        score_floor=.65, min_margin=.03,
                        amplitude_min=.3, amplitude_max=3.,
                        half_width=8, max_passes=3, detector=None,
                        noise_uv=None, floor_snr=4.5,
                        core_start=0, core_stop=None, all_events=None,
-                       shift_radius=2, refractory_samples=2):
+                       shift_radius=2, refractory_samples=2,
+                       template_identity_map=None):
     """Greedy reference: fit, subtract and redetect overlaps in bounded cores.
 
     The detector receives the residual and must return (sample, channel, snr)
@@ -203,6 +237,8 @@ def match_residual_cpu(residual, events, models: LocalModels, *,
     context without creating duplicate cross-core output rows.
     """
     residual = np.array(residual, dtype=np.float32, copy=True)
+    identity_map = normalize_template_identity_map(
+        template_identity_map, len(models.waveforms))
     if core_stop is None:
         core_stop = len(residual)
     accepted = []
@@ -235,6 +271,7 @@ def match_residual_cpu(residual, events, models: LocalModels, *,
                         options.append((gain, score, unit, amplitude, shift))
                 if options:
                     scored.append(max(options, key=lambda row: (row[0], -abs(row[4]), -row[4])))
+            scored = collapse_identity_scores(scored, identity_map)
             if not scored:
                 continue
             scored.sort(reverse=True)

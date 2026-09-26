@@ -10,6 +10,8 @@ import weakref
 
 import numpy as np
 
+from .cuda_environment import configure_cupy_cache
+
 EXPECTED_READER_SHA256 = '69f3209529c20618126774b3ac2b6c65d800005c8b379b4fcc200fc186fdc055'
 
 
@@ -58,6 +60,7 @@ def source_slice(reader, start, stop, cache=None, sequential=False):
 
 class Int16Reader:
     def __init__(self, read_cache=None):
+        configure_cupy_cache()
         import cupy as cp
         self.cp = cp
         self.module = cp.RawModule(code=Path(__file__).with_suffix('.cu').read_text(),

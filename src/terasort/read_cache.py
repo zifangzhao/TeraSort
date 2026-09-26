@@ -25,6 +25,18 @@ class ReadAheadCache:
         self.block_bytes, self.slots, self.workers = block_mb*1024**2, slots, workers
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='terasort-download')
         self.files, self.future = OrderedDict(), None
+
+        # Whitening samples distant batches. Keep those exact ranges in RAM
+        # while concurrent SMB reads overlap the current GPU batch. Never
+        # prefetch a whole 4 GiB sequential cache block for a sparse request.
+        self.sparse_depth = min(workers, 4)
+        self.sparse_max_range_bytes = 64*1024**2
+        self.sparse_pool = ThreadPoolExecutor(max_workers=self.sparse_depth,
+                                              thread_name_prefix='terasort-sparse')
+        self.sparse_futures = OrderedDict()
+        self.sparse_history = []
+        self.sparse_served_bytes = 0
+        self.sparse_wait_seconds = 0.
         self.direct, self.direct_path = None, None
         self.counter = 0
         self.network_bytes = self.direct_bytes = self.cache_bytes = 0
@@ -122,6 +134,50 @@ class ReadAheadCache:
         self.counter += 1
         self.future = (key,self.pool.submit(self._download,key,target))
 
+    def _read_sparse_range(self, path, start, stop):
+        before = path.stat()
+        with path.open('rb', buffering=0) as source:
+            source.seek(start)
+            payload = source.read(stop-start)
+        if len(payload) != stop-start:
+            raise OSError('Short sparse source read')
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise OSError('Source changed during sparse prefetch')
+        self._record_download(len(payload))
+        return payload
+
+    def _reset_sparse(self):
+        for future in self.sparse_futures.values():
+            future.cancel()
+        self.sparse_futures.clear()
+        self.sparse_history.clear()
+
+    def _schedule_sparse(self, path, start, stop):
+        current = (path, start, stop)
+        self.sparse_history.append(current)
+        self.sparse_history = self.sparse_history[-3:]
+        if len(self.sparse_history) < 3:
+            return
+        first, previous, current = self.sparse_history
+        length = stop-start
+        stride = start-previous[1]
+        if (first[0] != path or previous[0] != path or
+            previous[2]-previous[1] != length or
+            stride != previous[1]-first[1] or
+            stride <= length or length > self.sparse_max_range_bytes):
+            return
+        size = path.stat().st_size
+        for step in range(1, self.sparse_depth+1):
+            future_start = start+step*stride
+            future_stop = future_start+length
+            if future_stop > size:
+                break
+            key = (path, future_start, future_stop)
+            if key not in self.sparse_futures and len(self.sparse_futures) < self.sparse_depth:
+                self.sparse_futures[key] = self.sparse_pool.submit(
+                    self._read_sparse_range, *key)
+
     def read(self, path, start, stop, *, sequential=False):
         path = Path(path).resolve()
         # Kilosort's concatenated-file offsets may be NumPy integer scalars.
@@ -131,18 +187,32 @@ class ReadAheadCache:
         if self.future is not None and self.future[1].done():
             self._settle()
         if not sequential:
-            # Strided Kilosort calibration must not download the unused gaps.
-            if self.direct_path != path:
-                if self.direct is not None:
-                    self.direct.close()
-                self.direct = path.open('rb',buffering=0)
-                self.direct_path = path
-            self.direct.seek(start)
-            payload = self.direct.read(stop-start)
-            self.direct_bytes += len(payload)
+            # Strided calibration uses only requested batches, plus a bounded
+            # prediction of the next exact batch ranges after stride stabilizes.
+            key = (path, start, stop)
+            future = self.sparse_futures.pop(key, None)
+            if future is not None:
+                begin = time.perf_counter()
+                payload = future.result()
+                self.sparse_wait_seconds += time.perf_counter()-begin
+                self.sparse_served_bytes += len(payload)
+            else:
+                if self.sparse_futures:
+                    self._reset_sparse()
+                if self.direct_path != path:
+                    if self.direct is not None:
+                        self.direct.close()
+                    self.direct = path.open('rb',buffering=0)
+                    self.direct_path = path
+                self.direct.seek(start)
+                payload = self.direct.read(stop-start)
+                self.direct_bytes += len(payload)
             if len(payload) != stop-start:
                 raise OSError('Short direct source read')
+            self._schedule_sparse(path, start, stop)
             return payload
+        if self.sparse_history or self.sparse_futures:
+            self._reset_sparse()
         output = bytearray(stop-start)
         position = start
         while position < stop:
@@ -174,9 +244,14 @@ class ReadAheadCache:
         return dict(downloaded_bytes=self.network_bytes,direct_bytes=self.direct_bytes,
                     cache_served_bytes=self.cache_bytes,wait_seconds=self.wait_seconds,
                     disk_budget_bytes=self.block_bytes*self.slots,
-                    read_buffer_bytes=8*1024**2,download_workers=self.workers)
+                    read_buffer_bytes=8*1024**2,download_workers=self.workers,
+                    sparse_prefetch_served_bytes=self.sparse_served_bytes,
+                    sparse_prefetch_wait_seconds=self.sparse_wait_seconds,
+                    sparse_prefetch_budget_bytes=self.sparse_depth*self.sparse_max_range_bytes)
 
     def close(self):
+        self._reset_sparse()
+        self.sparse_pool.shutdown(wait=True,cancel_futures=True)
         if self.direct is not None:
             self.direct.close()
         self.pool.shutdown(wait=True,cancel_futures=True)

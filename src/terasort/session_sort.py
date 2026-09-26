@@ -24,6 +24,7 @@ from .session_signal import (assess_quality, iter_cores, prefetch_cores,
                              preprocess)
 from .session_store import RunJournal, ShardWriter
 from .session_timing import AdaptiveShiftRadius
+from .cuda_environment import configure_cupy_cache
 
 
 def _detect_cpu(voltage, noise, floor, *, max_candidates):
@@ -81,6 +82,39 @@ def _model_from_completed(path):
                            int(group.attrs["version"]))
 
 
+def _configure_template_proposals(models, probe, radius_um):
+    """Index models by nearby anchor contacts, bounded by probe geometry.
+
+    A detection on a contact only competes against templates anchored on the
+    same shank and within ``radius_um``. This keeps event/template pair counts
+    proportional to local density instead of total session template count.
+    """
+    try:
+        radius_um = float(radius_um)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Template proposal radius must be finite and positive") from exc
+    geometry = np.asarray(probe.geometry, dtype=np.float64)
+    shank = np.asarray(probe.shank)
+    anchors = np.asarray(models.anchors, dtype=np.int64)
+    if (not np.isfinite(radius_um) or radius_um <= 0
+            or geometry.shape != (probe.n_channels, 2)
+            or shank.shape != (probe.n_channels,)
+            or np.any(anchors < 0) or np.any(anchors >= probe.n_channels)):
+        raise ValueError("Invalid template proposal radius, probe geometry, or model anchors")
+    anchor_geometry = geometry[anchors]
+    anchor_shank = shank[anchors]
+    by_channel = {}
+    for channel in range(probe.n_channels):
+        delta = anchor_geometry - geometry[channel]
+        distance2 = np.einsum("md,md->m", delta, delta)
+        units = np.flatnonzero(
+            (anchor_shank == shank[channel])
+            & (distance2 <= radius_um * radius_um))
+        by_channel[channel] = units.astype(np.int64).tolist()
+    models.by_channel = by_channel
+    return max((len(units) for units in by_channel.values()), default=0)
+
+
 def _shard_intervals(probe, *, shard_seconds, start_sample, stop_sample):
     step = max(1, round(probe.sample_rate_hz * shard_seconds))
     for segment in probe.segments:
@@ -126,8 +160,12 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 floor_snr=4.5, score_floor=.65, min_margin=.03,
                 cache_fraction=.05, max_candidates=500_000,
                 start_sample=0, stop_sample=None, vram_limit_gb=12.,
+                template_merge_cosine=None, template_merge_radius_um=32.,
+                template_proposal_radius_um=48., export_amplitude_min=None,
+                fit_amplitude_min=None,
                 progress=None, freeze_templates=False, novelty="off", residual_passes=3,
-                overlap_policy='strict', rescue_floor_snr=None, rescue_passes=1,
+                overlap_policy='strict', overlap_window_samples=None,
+                rescue_floor_snr=None, rescue_passes=1,
                 shift_radius=2, half_width=8, refit_rounds=0, detector_mode='raw',
                 read_buffer_mb=0, prefetch_depth=2,
                 adaptive_shift_radius=False,
@@ -173,16 +211,58 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
         raise ValueError('CUDA rescue threshold must be positive and at most primary floor_snr')
     if overlap_policy not in ('strict', 'interference') or (backend == 'cpu' and overlap_policy != 'strict'):
         raise ValueError('Interference scheduling requires CUDA; CPU already fits sequentially')
+    if overlap_window_samples is None:
+        strict_overlap_window_samples = 61
+    else:
+        if (isinstance(overlap_window_samples, (bool, np.bool_))
+                or not isinstance(overlap_window_samples, (int, np.integer))
+                or not 0 <= int(overlap_window_samples) <= 61):
+            raise ValueError('Overlap window must be an integer from 0 to 61 samples')
+        strict_overlap_window_samples = int(overlap_window_samples)
+        if strict_overlap_window_samples != 61 and (backend != 'cuda' or overlap_policy != 'strict'):
+            raise ValueError('A shortened overlap window requires CUDA strict mode')
     if not isinstance(residual_passes, int) or not 1 <= residual_passes <= 12:
         raise ValueError('Residual passes must be an integer from 1 to 12')
     if novelty not in ('off', 'shadow', 'enroll') or (novelty == 'enroll' and freeze_templates):
         raise ValueError('Invalid novelty mode or enrollment with frozen templates')
+    if fit_amplitude_min is not None:
+        if isinstance(fit_amplitude_min, (bool, np.bool_)):
+            raise ValueError("Fit amplitude minimum must be finite and in [0, 3]")
+        try:
+            fit_amplitude_min = float(fit_amplitude_min)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Fit amplitude minimum must be finite and in [0, 3]") from exc
+        if not np.isfinite(fit_amplitude_min) or not 0 <= fit_amplitude_min <= 3:
+            raise ValueError("Fit amplitude minimum must be finite and in [0, 3]")
+    if export_amplitude_min is not None:
+        if isinstance(export_amplitude_min, (bool, np.bool_)):
+            raise ValueError("Export amplitude minimum must be finite and nonnegative")
+        try:
+            export_amplitude_min = float(export_amplitude_min)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Export amplitude minimum must be finite and nonnegative") from exc
+        if not np.isfinite(export_amplitude_min) or export_amplitude_min < 0:
+            raise ValueError("Export amplitude minimum must be finite and nonnegative")
     if (not 0 < core_seconds <= shard_seconds or halo_ms < 0 or
             floor_snr <= 0 or not 0 < score_floor <= 1 or
             not 0 <= min_margin <= 1 or not 0 <= cache_fraction <= 1 or
             max_candidates < 1 or start_sample < 0 or
             (stop_sample is not None and stop_sample <= start_sample)):
         raise ValueError("Invalid bounded session configuration")
+    if template_merge_cosine is not None:
+        template_merge_cosine = float(template_merge_cosine)
+        template_merge_radius_um = float(template_merge_radius_um)
+        if (not np.isfinite(template_merge_cosine)
+                or not 0 < template_merge_cosine <= 1
+                or not np.isfinite(template_merge_radius_um)
+                or template_merge_radius_um <= 0):
+            raise ValueError("Template merge cosine must be in (0, 1] and radius positive")
+    try:
+        template_proposal_radius_um = float(template_proposal_radius_um)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Template proposal radius must be finite and positive") from exc
+    if not np.isfinite(template_proposal_radius_um) or template_proposal_radius_um <= 0:
+        raise ValueError("Template proposal radius must be finite and positive")
     config = {
         "backend": backend, "core_seconds": core_seconds,
         "shard_seconds": shard_seconds, "halo_ms": halo_ms,
@@ -192,6 +272,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
         "stop_sample": stop_sample, "vram_limit_gb": vram_limit_gb,
         "preprocessing": "per-shank median; zero-phase 300-6000 Hz Butterworth v1",
         "matcher": f"center{2*half_width+1} proposal; noise-weighted full61 fitting v2; experimental",
+        "template_proposal_radius_um": template_proposal_radius_um,
         "adaptation": "bounded_recent_evidence_temporal_holdout_v1",
         "freeze_templates": freeze_templates,
         "residual_passes": residual_passes,
@@ -223,9 +304,32 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
     # are immutable for a run, just like the scientific configuration.
     if read_buffer_mb or prefetch_depth != 2:
         config.update(read_buffer_mb=read_buffer_mb, prefetch_depth=prefetch_depth)
+    if overlap_window_samples is not None and strict_overlap_window_samples != 61:
+        config['strict_contact_overlap_samples'] = strict_overlap_window_samples
+        config['subtraction_coloring'] = 'contact_time_disjoint_32_v1'
+    if export_amplitude_min is not None:
+        config["spike_export_filter"] = {
+            "algorithm": "matched_amplitude_scale_min_v1",
+            "minimum": export_amplitude_min,
+            "scope": "output_view_only",
+        }
+    if fit_amplitude_min is not None:
+        config["pre_subtraction_amplitude_floor"] = {
+            "algorithm": "matched_amplitude_scale_min_v1",
+            "minimum": fit_amplitude_min,
+            "scope": "matcher_acceptance_and_residual_subtraction",
+        }
+    if template_merge_cosine is not None:
+        config["template_linking"] = {
+            "algorithm": "local_signed_cosine_components_v1",
+            "cosine_threshold": template_merge_cosine,
+            "anchor_radius_um": template_merge_radius_um,
+            "assignment_margin": "best_fit_per_linked_identity_v1",
+        }
     source_record = session.as_source_record()
     journal = RunJournal(output_root, source_record, config, resume=resume)
     if backend == "cuda":
+        configure_cupy_cache()
         import cupy as cp
         if vram_limit_gb <= 0:
             raise ValueError("Positive GPU pool limit required")
@@ -241,10 +345,13 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
               "raw_bytes_covered": 0,
               "derived_bytes": 0, "peak_process_rss_bytes": 0,
               "peak_gpu_pool_bytes": 0,
-              "peak_total_vram_used_bytes": 0}
+              "peak_total_vram_used_bytes": 0,
+              "matcher_diagnostics": {}}
     for probe in session.probes:
         day_id = None
         models = None
+        template_link_map = None
+        template_link_metadata = None
         matcher = None
         adaptive_shift = None
         neighbor_map = geometry_channel_map(
@@ -258,6 +365,24 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 day_id = segment.day_id
                 emit("calibration_start", probe_id=probe.probe_id, day_id=day_id)
                 models = _day_models(probe, day_id, journal.root, resume=resume)
+                max_local_models = _configure_template_proposals(
+                    models, probe, template_proposal_radius_um)
+                if backend == "cuda" and max_local_models > 512:
+                    raise ValueError(
+                        f"Template proposal radius {template_proposal_radius_um:g} um "
+                        f"puts {max_local_models} models on one channel; reduce the radius")
+                template_link_map = None
+                template_link_metadata = None
+                if template_merge_cosine is not None:
+                    from .session_template_merge import build_template_map
+                    template_link_map, template_link_metadata = build_template_map(
+                        models.waveforms, models.channels, models.anchors,
+                        probe.geometry, probe.shank,
+                        cosine_threshold=template_merge_cosine,
+                        radius_um=template_merge_radius_um,
+                    )
+                    emit("template_links_complete", probe_id=probe.probe_id,
+                         day_id=day_id, **template_link_metadata)
                 evidence = TemplateEvidence(models, probe.sample_rate_hz)
                 adaptive_shift = (AdaptiveShiftRadius(
                     len(models.waveforms), probe.sample_rate_hz, shift_radius,
@@ -268,13 +393,16 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     raise ValueError('Novelty requires seeds with the session local-channel width')
                 emit("calibration_complete", probe_id=probe.probe_id,
                      day_id=day_id, templates=len(models.waveforms))
-                matcher = (CudaResidualMatcher(models) if backend == "cuda"
-                           else None)
+                matcher = (CudaResidualMatcher(
+                    models, template_identity_map=template_link_map)
+                    if backend == "cuda" else None)
             output = journal.shard_path(probe.probe_id, start, stop)
             if journal.completed(output):
                 if not resume:
                     raise FileExistsError(output)
                 models = _model_from_completed(output)
+                _configure_template_proposals(
+                    models, probe, template_proposal_radius_um)
                 evidence = TemplateEvidence(models, probe.sample_rate_hz)
                 with h5py.File(output, 'r') as handle:
                     evidence.restore(handle)
@@ -296,13 +424,17 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
             writer = ShardWriter(
                 output, probe=probe, day_id=segment.day_id,
                 start_sample=start, stop_sample=stop,
-                config_sha256=journal.record["config_sha256"])
+                config_sha256=journal.record["config_sha256"],
+                template_link_map=template_link_map,
+                template_link_metadata=template_link_metadata,
+                export_amplitude_min=export_amplitude_min)
             shard_started = time.perf_counter()
             shard_bytes = 0
             shard_raw_bytes = 0
             shard_peak_rss = 0
             shard_peak_gpu_pool = 0
             shard_peak_total_vram = 0
+            shard_match_diagnostics = {}
             try:
                 cores = iter_cores(
                     probe, core_seconds=core_seconds, halo_samples=halo,
@@ -319,6 +451,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     core_shift_radius = (
                         adaptive_shift.for_core(len(models.waveforms))
                         if adaptive_shift is not None else shift_radius)
+                    core_match_diagnostics = None
                     if matcher is not None:
                         events, matches = matcher.match(
                             signal, noise, floor_snr, core_start=local_start,
@@ -326,12 +459,15 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                             min_margin=min_margin,
                             max_passes=residual_passes,
                             overlap_policy=overlap_policy,
+                            overlap_window_samples=strict_overlap_window_samples,
                             rescue_floor_snr=rescue_floor_snr,
                             rescue_passes=rescue_passes, shift_radius=core_shift_radius,
                             half_width=half_width,
                             detector_mode=detector_mode,
+                            amplitude_min=(fit_amplitude_min if fit_amplitude_min is not None else .3),
                             refractory_samples=max(2, round(probe.sample_rate_hz*.0005)),
                             max_candidates=max_candidates)
+                        core_match_diagnostics = matcher.last_diagnostics
                     else:
                         events = _detect_cpu(signal, noise, floor_snr,
                                              max_candidates=max_candidates)
@@ -345,10 +481,12 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                             max_passes=residual_passes,
                             shift_radius=shift_radius,
                             half_width=half_width,
+                            amplitude_min=(fit_amplitude_min if fit_amplitude_min is not None else .3),
                             noise_uv=noise, floor_snr=floor_snr,
                             core_start=local_start, core_stop=local_stop,
                             refractory_samples=max(2, round(probe.sample_rate_hz*.0005)),
-                            all_events=all_events)
+                            all_events=all_events,
+                            template_identity_map=template_link_map)
                         events = all_events
                     if refit_rounds:
                         from .session_local_refit import local_refit
@@ -356,6 +494,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                             core_start=local_start, core_stop=local_stop, rounds=refit_rounds,
                             half_width=half_width, shift_radius=shift_radius,
                             score_floor=score_floor, min_margin=min_margin,
+                            amplitude_min=(fit_amplitude_min if fit_amplitude_min is not None else .3),
                             gain_floor=floor_snr**2,
                             refractory_samples=max(2,round(probe.sample_rate_hz*.0005)))
                     if adaptive_shift is not None:
@@ -369,6 +508,14 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                                      adaptive_shift.radii > shift_radius)),
                                  units=len(adaptive_shift.radii),
                                  pilot_samples=adaptive_shift.pilot_samples)
+                    if core_match_diagnostics is not None:
+                        for name, value in core_match_diagnostics.items():
+                            if name == 'passes':
+                                continue
+                            totals['matcher_diagnostics'][name] = (
+                                totals['matcher_diagnostics'].get(name, 0) + value)
+                            shard_match_diagnostics[name] = (
+                                shard_match_diagnostics.get(name, 0) + value)
                     writer.append_core(
                         core=core, voltage_uv=signal, quality=quality,
                         threshold_events=events, matches=matches,
@@ -387,7 +534,8 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     totals["source_bytes_read"] += core.source_bytes_read
                     emit("core_complete", probe_id=probe.probe_id,
                          stop_sample=core.core_stop, spikes=len(matches),
-                         detections=len(events))
+                         detections=len(events),
+                         matcher_diagnostics=core_match_diagnostics)
                     shard_bytes += core.source_bytes_read
                     raw_bytes = ((core.core_stop - core.core_start) *
                                  probe.n_channels * 2)
@@ -405,6 +553,12 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 update_audit = evidence.promote(models, stop)
                 if novel is not None:
                     novel_audit = novel.evaluate(models, stop, enroll=novelty == 'enroll')
+                    max_local_models = _configure_template_proposals(
+                        models, probe, template_proposal_radius_um)
+                    if backend == "cuda" and max_local_models > 512:
+                        raise ValueError(
+                            f"Template enrollment grew a local proposal pool to "
+                            f"{max_local_models}; reduce the proposal radius")
                     evidence.extend_models(models)
                     novel.save(writer.handle, novel_audit)
                     enrolled = sum(row['enrolled_unit'] is not None for row in novel_audit)
@@ -430,6 +584,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                     "peak_process_rss_bytes": shard_peak_rss,
                     "peak_gpu_pool_bytes": shard_peak_gpu_pool,
                     "peak_total_vram_used_bytes": shard_peak_total_vram,
+                    "matcher_diagnostics": shard_match_diagnostics,
                 }, adaptive_shift=adaptive_shift)
             except BaseException:
                 writer.abort()

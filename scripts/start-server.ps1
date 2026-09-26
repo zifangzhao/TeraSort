@@ -3,6 +3,7 @@ param([switch]$CheckOnly, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $python = Join-Path $root '.venv\Scripts\python.exe'
+$environmentCheck = Join-Path $PSScriptRoot 'environment_check.py'
 $url = 'http://127.0.0.1:8765/'
 $alreadyRunning = $false
 try {
@@ -12,7 +13,7 @@ try {
 } catch {
     # No responding dashboard: the server below reports any port conflict.
 }
-if ($alreadyRunning) {
+if ($alreadyRunning -and -not $CheckOnly) {
     Write-Host "TeraSort is already running: $url"
     if (-not $NoBrowser -and -not $CheckOnly) { Start-Process $url }
     exit 0
@@ -29,7 +30,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     if ($LASTEXITCODE -ne 0) { throw 'Automatic environment installation failed.' }
 }
 
-& $python -c 'import importlib.metadata as m, torch, cupy, kilosort, terasort, terasort.web; assert m.version("kilosort") == "4.1.7"; assert torch.__version__.split("+",1)[0] == "2.10.0" and torch.version.cuda == "12.8"'
+& $python $environmentCheck packages
 $environmentReady = ($LASTEXITCODE -eq 0)
 if (-not $environmentReady) {
     if ($CheckOnly) {
@@ -38,9 +39,12 @@ if (-not $environmentReady) {
     Write-Host 'Required packages are missing or incompatible. Repairing the environment...'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Automatic dependency repair failed.' }
-    & $python -c 'import importlib.metadata as m, torch, cupy, kilosort, terasort, terasort.web; assert m.version("kilosort") == "4.1.7"; assert torch.__version__.split("+",1)[0] == "2.10.0" and torch.version.cuda == "12.8"'
+    & $python $environmentCheck packages
     if ($LASTEXITCODE -ne 0) { throw 'Required dependencies are still unavailable after repair.' }
 }
+
+& $python $environmentCheck progress-smoke
+if ($LASTEXITCODE -ne 0) { throw 'Three-phase progress hooks are unavailable. Run install_and_start.bat to repair the environment.' }
 
 if ($CheckOnly) {
     Write-Host "Environment ready. Start the dashboard with start_server.bat ($url)."

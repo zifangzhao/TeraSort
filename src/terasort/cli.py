@@ -36,6 +36,8 @@ def main(argv=None):
     session.add_argument("--residual-passes", type=int, default=3,
                          help="Bounded overlap-recovery passes (1–12; default 3)")
     session.add_argument('--overlap-policy', choices=('strict','interference'), default='strict')
+    session.add_argument('--overlap-window-samples', type=int,
+                         help='Experimental CUDA strict-mode cross-unit exclusion window (0–61 samples; default 61)')
     session.add_argument("--halo-ms", type=float, default=100.)
     session.add_argument("--read-buffer-mb", type=int, default=0,
                          help="Sequential read buffer in MiB, 0 disables grouping (max 1024)")
@@ -52,6 +54,16 @@ def main(argv=None):
     session.add_argument('--adaptive-shift-boundary-fraction', type=float, default=.05,
                          help='Pilot boundary-fit fraction required to retain the wider radius (default .05)')
     session.add_argument("--score-floor", type=float, default=.65)
+    session.add_argument('--template-proposal-radius-um', type=float, default=48.,
+                         help='Same-shank anchor radius for local template proposals (default 48 um)')
+    session.add_argument("--export-amplitude-min", type=float,
+                         help="Optional output-view filter on fitted amplitude; full spike rows remain stored")
+    session.add_argument("--fit-amplitude-min", type=float,
+                         help="Raise fitted-amplitude minimum before residual subtraction (0–3; default 0.3)")
+    session.add_argument("--template-merge-cosine", type=float,
+                         help="Optional post-fit identity linking for near-duplicate seed templates")
+    session.add_argument("--template-merge-radius-um", type=float, default=32.,
+                         help="Maximum same-shank anchor spacing for template linking (default 32 um)")
     session.add_argument('--half-width', type=int, default=8,
                          help='Scoring half width in samples (3–30)')
     session.add_argument('--refit-rounds', type=int, default=0,
@@ -141,7 +153,13 @@ def main(argv=None):
             start_sample=args.start_sample, stop_sample=args.stop_sample,
             vram_limit_gb=args.vram_limit_gb,
             freeze_templates=args.freeze_templates, novelty=args.novelty,
-            residual_passes=args.residual_passes, overlap_policy=args.overlap_policy)
+            residual_passes=args.residual_passes, overlap_policy=args.overlap_policy,
+            overlap_window_samples=args.overlap_window_samples,
+            template_merge_cosine=args.template_merge_cosine,
+            template_merge_radius_um=args.template_merge_radius_um,
+            template_proposal_radius_um=args.template_proposal_radius_um,
+            export_amplitude_min=args.export_amplitude_min,
+            fit_amplitude_min=args.fit_amplitude_min)
         print(json.dumps(result, indent=2))
         return 0
     if args.command == "session-quality":

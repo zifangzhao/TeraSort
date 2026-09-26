@@ -116,7 +116,9 @@ class ShardWriter:
     """SCB 0.3 candidate metadata, sparse waveform cache, TSA-like spikes."""
 
     def __init__(self, path, *, probe, day_id, start_sample, stop_sample,
-                 config_sha256, waveform_scale_uv=1.):
+                 config_sha256, waveform_scale_uv=1.,
+                 template_link_map=None, template_link_metadata=None,
+                 export_amplitude_min=None):
         self.path = Path(path)
         self.partial = self.path.with_suffix(self.path.suffix + ".partial")
         if self.path.exists() or self.partial.exists():
@@ -135,8 +137,23 @@ class ShardWriter:
         h.attrs["stop_sample"] = int(stop_sample)
         h.attrs["config_sha256"] = config_sha256
         h.attrs["waveform_scale_uv"] = float(waveform_scale_uv)
+        if template_link_map is not None:
+            mapping = np.asarray(template_link_map, dtype=np.int64)
+            if mapping.ndim != 1 or np.any(mapping < 0):
+                raise ValueError("Invalid template link map")
+            group = h.create_group("template_linking")
+            group.create_dataset("template_to_unit", data=mapping, dtype="<i8")
+            group.attrs["metadata_json"] = json.dumps(
+                template_link_metadata or {}, sort_keys=True)
         self.candidates = _dataset(h, "candidates", CANDIDATE_DTYPE)
         self.spikes = _dataset(h, "spikes", SPIKE_DTYPE)
+        self.export_amplitude_min = export_amplitude_min
+        if export_amplitude_min is not None:
+            h.attrs["spike_export_filter_json"] = json.dumps({
+                "algorithm": "matched_amplitude_scale_min_v1",
+                "minimum": float(export_amplitude_min),
+                "scope": "output_view_only",
+            }, sort_keys=True)
         self.qc = _dataset(h, "qc", QC_DTYPE, chunk=1024)
         nchan = probe.n_channels
         self.noise = h.create_dataset("qc_noise_uv", (0, nchan), maxshape=(None, nchan),
@@ -278,7 +295,23 @@ class ShardWriter:
                 self.cached_bytes += len(selected) * row_bytes
         self.handle.flush()
 
+    def _write_export_mask(self):
+        """Build the optional view mask in bounded blocks after dense sorting."""
+        if self.export_amplitude_min is None:
+            return
+        count = len(self.spikes)
+        chunk = max(1, min(65_536, count))
+        mask = self.handle.create_dataset(
+            "spike_export_mask", shape=(count,), maxshape=(None,), dtype="u1",
+            chunks=(chunk,), compression="lzf", shuffle=True)
+        block_rows = 1_048_576
+        for first in range(0, count, block_rows):
+            stop = min(count, first + block_rows)
+            amplitudes = self.spikes[first:stop]["fitted_amplitude"]
+            mask[first:stop] = (amplitudes >= self.export_amplitude_min).astype(np.uint8)
+
     def finish(self, models, *, telemetry=None, adaptive_shift=None):
+        self._write_export_mask()
         group = self.handle.create_group("model_after")
         group.create_dataset("waveforms", data=models.waveforms,
                              compression="lzf")

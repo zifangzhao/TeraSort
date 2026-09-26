@@ -8,6 +8,8 @@ from pathlib import Path
 import os
 import numpy as np
 
+from ..cuda_environment import configure_cupy_cache
+
 
 def validate(q, radius, floor, valid_start=0, valid_stop=None, neighbors=None):
     if len(q.shape) != 2 or not all(q.shape):
@@ -99,6 +101,7 @@ def torch_detect(q, radius=1, floor=3., neighbors=None, valid_start=0, valid_sto
 class CudaDetector:
     """Custom CUDA C++ kernels compiled by NVRTC, with reusable work buffers."""
     def __init__(self, capacity_fraction=.02, minimum_capacity=4096):
+        configure_cupy_cache()
         import cupy as cp
         self.cp = cp
         self.capacity_fraction = capacity_fraction

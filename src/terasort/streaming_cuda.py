@@ -1,9 +1,9 @@
 """Direct-CUDA batched scorer for the experimental local template bank."""
 
 from pathlib import Path
-import os
-import tempfile
 import numpy as np
+
+from .cuda_environment import configure_cupy_cache
 
 
 class CudaLocalMatcher:
@@ -14,12 +14,7 @@ class CudaLocalMatcher:
     """
 
     def __init__(self, bank):
-        # A local cache avoids stalls observed when CuPy's profile-directory
-        # cache resides on a redirected or locked Windows home directory.
-        if "CUPY_CACHE_DIR" not in os.environ:
-            cache = Path(tempfile.gettempdir()) / "terasort-cupy-cache"
-            cache.mkdir(parents=True, exist_ok=True)
-            os.environ["CUPY_CACHE_DIR"] = str(cache)
+        configure_cupy_cache()
         import cupy as cp
         self.cp = cp
         self.bank = bank

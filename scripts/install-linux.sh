@@ -93,5 +93,6 @@ echo "Installing or repairing TeraSort and its Python packages..."
 
 echo "Checking CUDA access and compiling the detection kernel..."
 "$venv_python" -c 'import cupy as cp,sys,torch,terasort; from terasort.candidates.detectors import CudaDetector; q=cp.zeros((16,2),cp.float32); q[3,0]=5; found=cp.asnumpy(CudaDetector().detect(q,floor=3)); print("TeraSort",terasort.__version__,"CUDA",torch.version.cuda,"available",torch.cuda.is_available(),"candidate",found.tolist()); sys.exit(0 if torch.cuda.is_available() and found.tolist()==[6] else 1)'
+"$venv_python" "$repo_root/scripts/environment_check.py" progress-smoke
 "$venv_python" -m terasort.cli backends
 echo "Linux environment is ready. Start the dashboard with ./start_server.sh --no-browser."
