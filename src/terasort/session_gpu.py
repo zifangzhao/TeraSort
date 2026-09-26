@@ -28,6 +28,7 @@ class CudaResidualMatcher:
         self.score_kernel = module.get_function("score_residual_pairs")
         self.subtract_kernel = module.get_function("subtract_fits")
         self.detect_kernel = module.get_function("detect_residual_peaks")
+        self.detect_smooth3_kernel = module.get_function("detect_residual_peaks_smooth3_shared")
         self.detect_buffer = None
         self.detect_count = cp.zeros(1, cp.uint64)
         self.template_version = -1
@@ -40,7 +41,29 @@ class CudaResidualMatcher:
             self.channels = self.cp.asarray(self.models.channels)
             self.template_version = self.models.version
 
-    def detect(self, residual, noise_uv, floor_snr, *, max_candidates=500_000, mode='raw'):
+    def _estimate_smooth3_noise(self, residual, noise_uv):
+        cp = self.cp
+        noise = np.asarray(noise_uv, np.float32)
+        if (noise.shape != (residual.shape[1],)
+                or np.any(np.isnan(noise) | (noise <= 0))):
+            raise ValueError('Positive channel noise required; infinity masks contacts')
+        nt = residual.shape[0]
+        step = max(1, nt // 4000)
+        sample_rows = cp.arange(0, nt, step, dtype=cp.int64)
+        sample = residual[sample_rows].copy()
+        interior = (sample_rows > 0) & (sample_rows < nt - 1)
+        rows = sample_rows[interior]
+        if rows.size:
+            sample[interior] = .25 * (
+                residual[rows - 1] + 2 * residual[rows] + residual[rows + 1])
+        sample = cp.asnumpy(sample)
+        center = np.median(sample, axis=0)
+        estimate = np.median(np.abs(sample - center), axis=0) / .67448975
+        return np.where(np.isfinite(noise),
+                        np.maximum(estimate, .01), np.inf).astype(np.float32)
+
+    def detect(self, residual, noise_uv, floor_snr, *, max_candidates=500_000,
+               mode='raw', smooth3_noise_uv=None):
         cp = self.cp
         if mode not in ('raw','smooth3'):
             raise ValueError('Unknown detector mode')
@@ -52,31 +75,51 @@ class CudaResidualMatcher:
         if noise.shape != (residual.shape[1],) or np.any(np.isnan(noise) | (noise <= 0)):
             raise ValueError('Positive channel noise required; infinity masks contacts')
         if mode == 'smooth3':
-            filtered = cp.empty_like(residual)
-            filtered[0] = residual[0]
-            filtered[-1] = residual[-1]
-            filtered[1:-1] = .25*(residual[:-2]+2*residual[1:-1]+residual[2:])
-            sample = cp.asnumpy(filtered[::max(1,len(filtered)//4000)])
-            center = np.median(sample,axis=0)
-            estimate = np.median(np.abs(sample-center),axis=0)/.67448975
-            noise = np.where(np.isfinite(noise),np.maximum(estimate,.01),np.inf).astype(np.float32)
-            residual = filtered
+            if smooth3_noise_uv is None:
+                noise = self._estimate_smooth3_noise(residual, noise)
+            else:
+                noise = np.asarray(smooth3_noise_uv, np.float32)
+                if (noise.shape != (residual.shape[1],)
+                        or np.any(np.isnan(noise) | (noise <= 0))):
+                    raise ValueError('Invalid precomputed smooth3 noise')
+        elif smooth3_noise_uv is not None:
+            raise ValueError('Precomputed smooth3 noise requires smooth3 mode')
+        nt, nc = residual.shape
         device_noise = cp.asarray(noise)
         capacity = min(residual.size, max_candidates)
         if self.detect_buffer is None or len(self.detect_buffer) != capacity:
             self.detect_buffer = cp.empty(capacity, cp.int64)
         self.detect_count.fill(0)
-        self.detect_kernel(((residual.size+255)//256,), (256,),
-            (residual, device_noise, np.int64(residual.shape[0]),
-             np.int32(residual.shape[1]), np.float32(floor_snr), self.detect_count,
-             self.detect_buffer, np.uint64(capacity)))
+        if mode == 'smooth3':
+            self.detect_smooth3_kernel(((nc + 31) // 32, (nt + 7) // 8), (32, 8),
+                (residual, device_noise, np.int64(nt), np.int32(nc),
+                 np.float32(floor_snr), self.detect_count, self.detect_buffer,
+                 np.uint64(capacity)))
+        else:
+            self.detect_kernel(((residual.size+255)//256,), (256,),
+                (residual, device_noise, np.int64(nt), np.int32(nc),
+                 np.float32(floor_snr), self.detect_count, self.detect_buffer,
+                 np.uint64(capacity)))
         count = int(self.detect_count.get()[0])
         if count > capacity:
             raise OverflowError("Artifact burst exceeds per-core candidate budget")
         flat = cp.sort(self.detect_buffer[:count])
         indices = cp.asnumpy(flat)
-        t, c = np.divmod(indices, residual.shape[1])
-        snr = cp.asnumpy(cp.abs(residual.ravel()[flat]) / device_noise[flat % residual.shape[1]])
+        t, c = np.divmod(indices, nc)
+        if mode == 'smooth3':
+            event_t = flat // nc
+            event_c = flat % nc
+            center_value = residual[event_t, event_c].copy()
+            interior = (event_t > 0) & (event_t < nt - 1)
+            rows = event_t[interior]
+            channels = event_c[interior]
+            center_value[interior] = .25 * (
+                residual[rows - 1, channels] + 2 * residual[rows, channels]
+                + residual[rows + 1, channels])
+            snr = cp.asnumpy(cp.abs(center_value) / device_noise[event_c])
+        else:
+            snr = cp.asnumpy(
+                cp.abs(residual.ravel()[flat]) / device_noise[flat % nc])
         return list(zip(t.astype(np.int32), c.astype(np.int32),
                         snr.astype(np.float32)))
 
@@ -178,8 +221,11 @@ class CudaResidualMatcher:
             from .session_interference import InterferenceScheduler
             scheduler = InterferenceScheduler(self.models, noise_uv)
         residual = cp.asarray(voltage_uv, dtype=cp.float32, order='C')
-        original = self.detect(residual, noise_uv, floor_snr,
-                               max_candidates=max_candidates, mode=detector_mode)
+        smooth3_noise = (self._estimate_smooth3_noise(residual, noise_uv)
+                         if detector_mode == 'smooth3' else None)
+        original = self.detect(
+            residual, noise_uv, floor_snr, max_candidates=max_candidates,
+            mode=detector_mode, smooth3_noise_uv=smooth3_noise)
         current = original
         all_events = []
         accepted = []
@@ -191,9 +237,11 @@ class CudaResidualMatcher:
             if strong_done and not rescue:
                 continue
             if pass_index:
-                current = self.detect(residual, noise_uv,
-                                      rescue_floor_snr if rescue else floor_snr,
-                                      max_candidates=max_candidates, mode=detector_mode)
+                current = self.detect(
+                    residual, noise_uv,
+                    rescue_floor_snr if rescue else floor_snr,
+                    max_candidates=max_candidates, mode=detector_mode,
+                    smooth3_noise_uv=smooth3_noise)
             if not current:
                 if rescue_floor_snr is not None and not rescue:
                     strong_done = True

@@ -32,6 +32,69 @@ extern "C" __global__ void detect_residual_peaks(
     }
 }
 
+// Three-tap temporal smoothing and local-peak detection in one pass. A block
+// cooperatively stages an 8-sample time tile plus two halo samples per side.
+// Warps own one time row, so lanes remain coalesced over neighboring contacts.
+extern "C" __global__ void detect_residual_peaks_smooth3_shared(
+    const float* residual, const float* noise, long long nt, int nc,
+    float floor, unsigned long long* count, long long* output,
+    unsigned long long capacity)
+{
+    const int cx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int c = (int)blockIdx.x * 32 + cx;
+    const long long base = (long long)blockIdx.y * 8;
+    __shared__ float tile[12][32];
+
+    for (int row = ty; row < 12; row += 8) {
+        long long t = base + row - 2;
+        if (t < 0) t = 0;
+        if (t >= nt) t = nt - 1;
+        tile[row][cx] = c < nc ? residual[t * (long long)nc + c] : 0.f;
+    }
+    __syncthreads();
+
+    const long long t = base + ty;
+    bool keep = false;
+    if (t < nt && c < nc && isfinite(noise[c]) && noise[c] > 0.f) {
+        const float center_raw = tile[ty + 2][cx];
+        const float center = (t == 0 || t == nt - 1)
+            ? center_raw
+            : 0.25f * (tile[ty + 1][cx] + 2.f * center_raw + tile[ty + 3][cx]);
+        const float q = fabsf(center) / noise[c];
+        keep = q > floor;
+        if (keep && t > 0) {
+            const long long previous_t = t - 1;
+            const float previous_raw = tile[ty + 1][cx];
+            const float previous = (previous_t == 0 || previous_t == nt - 1)
+                ? previous_raw
+                : 0.25f * (tile[ty][cx] + 2.f * previous_raw + tile[ty + 2][cx]);
+            keep = q > fabsf(previous) / noise[c];
+        }
+        if (keep && t + 1 < nt) {
+            const long long next_t = t + 1;
+            const float next_raw = tile[ty + 3][cx];
+            const float next = (next_t == 0 || next_t == nt - 1)
+                ? next_raw
+                : 0.25f * (tile[ty + 2][cx] + 2.f * next_raw + tile[ty + 4][cx]);
+            keep = q >= fabsf(next) / noise[c];
+        }
+    }
+
+    const unsigned int bits = __ballot_sync(0xffffffff, keep);
+    const int lane = cx;
+    unsigned long long base_out = 0;
+    if (lane == 0 && bits)
+        base_out = atomicAdd(count, (unsigned long long)__popc(bits));
+    base_out = __shfl_sync(0xffffffff, base_out, 0);
+    if (keep) {
+        const unsigned int before = lane == 0 ? 0 : bits & ((1u << lane) - 1u);
+        const unsigned long long slot = base_out + __popc(before);
+        if (slot < capacity)
+            output[slot] = t * (long long)nc + c;
+    }
+}
+
 __device__ __forceinline__ float session_warp_sum(float x) {
     for (int d = 16; d; d >>= 1)
         x += __shfl_down_sync(0xffffffff, x, d);

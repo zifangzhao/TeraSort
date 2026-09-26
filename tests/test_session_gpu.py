@@ -328,3 +328,71 @@ def test_smoothed_detector_matches_cpu_filter_and_mad(gpu):
     events=matcher.detect(cp.asarray(signal),[1,np.inf],4.5,mode='smooth3')
     np.testing.assert_array_equal([int(t)*2+int(c) for t,c,s in events],expected)
     np.testing.assert_allclose([s for t,c,s in events],(np.abs(filtered)/noise).ravel()[expected],rtol=1e-6)
+
+
+@pytest.mark.parametrize("nt,nc", [(1, 1), (2, 33), (7, 31), (9, 33), (401, 37)])
+def test_smooth3_shared_detector_matches_cpu_for_tile_edges(gpu, nt, nc):
+    from terasort.candidates.detectors import numpy_detect
+
+    cp, matcher_type = gpu
+    signal = np.random.default_rng(nt * 100 + nc).normal(
+        0, 1, (nt, nc)).astype(np.float32)
+    signal[0, 0] = -8
+    signal[nt // 2, 0] = -11
+    signal[-1, 0] = -7
+    raw_noise = np.ones(nc, np.float32)
+    if nc > 1:
+        raw_noise[-1] = np.inf
+
+    filtered = signal.copy()
+    if nt > 2:
+        filtered[1:-1] = .25 * (
+            signal[:-2] + 2 * signal[1:-1] + signal[2:])
+    step = max(1, nt // 4000)
+    sample = filtered[::step]
+    estimate = np.median(
+        np.abs(sample - np.median(sample, axis=0)), axis=0) / .67448975
+    noise = np.where(np.isfinite(raw_noise), np.maximum(estimate, .01), np.inf)
+    expected = numpy_detect(np.abs(filtered) / noise, floor=2.5)
+
+    events = matcher_type(model_fixture()).detect(
+        cp.asarray(signal), raw_noise, 2.5, mode="smooth3")
+    indices = np.asarray([int(t) * nc + int(c) for t, c, _ in events])
+    np.testing.assert_array_equal(indices, expected)
+    np.testing.assert_allclose(
+        [score for _, _, score in events],
+        (np.abs(filtered) / noise).ravel()[expected],
+        rtol=1e-6, atol=1e-6)
+
+
+def test_smooth3_match_reuses_core_noise_for_residual_passes(gpu, monkeypatch):
+    cp, matcher_type = gpu
+    models = model_fixture()
+    signal = np.zeros((2000, 2), np.float32)
+    signal[200:261] += models.waveforms[0]
+    signal[1000:1061] += models.waveforms[0]
+    matcher = matcher_type(models)
+    estimate_calls = []
+    detect_noise = []
+    estimate = matcher._estimate_smooth3_noise
+    detect = matcher.detect
+
+    def tracked_estimate(residual, noise_uv):
+        estimate_calls.append(1)
+        return estimate(residual, noise_uv)
+
+    def tracked_detect(residual, noise_uv, floor_snr, **kwargs):
+        if kwargs.get("mode") == "smooth3":
+            detect_noise.append(kwargs.get("smooth3_noise_uv"))
+        return detect(residual, noise_uv, floor_snr, **kwargs)
+
+    monkeypatch.setattr(matcher, "_estimate_smooth3_noise", tracked_estimate)
+    monkeypatch.setattr(matcher, "detect", tracked_detect)
+    candidates, matches = matcher.match(
+        signal, np.ones(2, np.float32), 4.5,
+        core_start=0, core_stop=len(signal), detector_mode="smooth3",
+        max_passes=3, score_floor=.65)
+    assert len(estimate_calls) == 1
+    assert len(detect_noise) >= 2
+    assert all(noise is detect_noise[0] for noise in detect_noise)
+    assert len(candidates) > 0 and len(matches) >= 2
