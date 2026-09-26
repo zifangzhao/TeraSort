@@ -35,6 +35,24 @@ def test_adaptive_radius_uses_boundary_support_and_restores_exactly(tmp_path):
     np.testing.assert_array_equal(resumed.boundary_fits, state.boundary_fits)
 
 
+def test_adaptive_radius_boundary_fraction_is_configurable_and_checkpointed(tmp_path):
+    state = AdaptiveShiftRadius(1, 100., 2, boundary_fraction=.1)
+    matches = [_match(0, i * 10, 3 if i < 2 else 0) for i in range(20)]
+    assert state.observe(matches, state.pilot_samples)
+    np.testing.assert_array_equal(state.radii, [3])
+    path = tmp_path / "timing_fraction.h5"
+    with h5py.File(path, "w") as handle:
+        state.save(handle.create_group("adaptive_shift"))
+    resumed = AdaptiveShiftRadius(1, 100., 2, boundary_fraction=.1)
+    with h5py.File(path, "r") as handle:
+        resumed.restore(handle["adaptive_shift"], 1)
+    np.testing.assert_array_equal(resumed.radii, [3])
+    incompatible = AdaptiveShiftRadius(1, 100., 2, boundary_fraction=.11)
+    with h5py.File(path, "r") as handle:
+        with pytest.raises(ValueError, match="configuration mismatch"):
+            incompatible.restore(handle["adaptive_shift"], 1)
+
+
 def test_bad_intervals_advance_pilot_without_training_templates():
     state = AdaptiveShiftRadius(unit_count=1, sample_rate_hz=100., base_radius=1)
     completed = state.observe([_match(0, 5, 2)], state.pilot_samples,
@@ -48,3 +66,9 @@ def test_bad_intervals_advance_pilot_without_training_templates():
 def test_adaptive_radius_rejects_invalid_base(base):
     with pytest.raises(ValueError):
         AdaptiveShiftRadius(1, 30000., base)
+
+
+@pytest.mark.parametrize("fraction", [0., -0.1, 1.01, np.nan, "invalid"])
+def test_adaptive_radius_rejects_invalid_boundary_fraction(fraction):
+    with pytest.raises(ValueError):
+        AdaptiveShiftRadius(1, 30000., 2, boundary_fraction=fraction)

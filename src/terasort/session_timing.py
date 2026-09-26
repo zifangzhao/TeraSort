@@ -19,13 +19,21 @@ class AdaptiveShiftRadius:
     MIN_OBSERVATIONS = 20
     BOUNDARY_FRACTION = 0.05
 
-    def __init__(self, unit_count, sample_rate_hz, base_radius):
+    def __init__(self, unit_count, sample_rate_hz, base_radius, *,
+                 boundary_fraction=BOUNDARY_FRACTION):
+        try:
+            boundary_fraction = float(boundary_fraction)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Invalid adaptive timing-search configuration") from exc
         if (unit_count < 0 or not np.isfinite(sample_rate_hz)
                 or sample_rate_hz <= 0 or not isinstance(base_radius, int)
-                or not 0 <= base_radius < 8):
+                or not 0 <= base_radius < 8
+                or not np.isfinite(boundary_fraction)
+                or not 0 < boundary_fraction <= 1):
             raise ValueError("Invalid adaptive timing-search configuration")
         self.sample_rate_hz = float(sample_rate_hz)
         self.base_radius = base_radius
+        self.boundary_fraction = float(boundary_fraction)
         self.pilot_samples = max(1, round(self.sample_rate_hz * self.PILOT_SECONDS))
         self.elapsed_samples = 0
         self.observations = np.zeros(unit_count, np.uint32)
@@ -79,7 +87,7 @@ class AdaptiveShiftRadius:
             return False
         enough = self.observations >= self.MIN_OBSERVATIONS
         frequent = (self.boundary_fits /
-                    np.maximum(self.observations, 1)) >= self.BOUNDARY_FRACTION
+                    np.maximum(self.observations, 1)) >= self.boundary_fraction
         self.radii[:] = self.base_radius
         self.radii[enough & frequent] = self.expanded_radius
         self.fitted = True
@@ -94,7 +102,7 @@ class AdaptiveShiftRadius:
             elapsed_samples=self.elapsed_samples,
             fitted=self.fitted,
             min_observations=self.MIN_OBSERVATIONS,
-            boundary_fraction=self.BOUNDARY_FRACTION,
+            boundary_fraction=self.boundary_fraction,
         )
         group.create_dataset("observations", data=self.observations)
         group.create_dataset("boundary_fits", data=self.boundary_fits)
@@ -107,7 +115,7 @@ class AdaptiveShiftRadius:
                 or int(attrs["base_radius"]) != self.base_radius
                 or int(attrs["pilot_samples"]) != self.pilot_samples
                 or int(attrs["min_observations"]) != self.MIN_OBSERVATIONS
-                or float(attrs["boundary_fraction"]) != self.BOUNDARY_FRACTION):
+                or float(attrs["boundary_fraction"]) != self.boundary_fraction):
             raise ValueError("Adaptive timing checkpoint configuration mismatch")
         observations = group["observations"][:]
         boundary_fits = group["boundary_fits"][:]

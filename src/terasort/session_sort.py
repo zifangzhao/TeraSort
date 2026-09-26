@@ -130,7 +130,8 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 overlap_policy='strict', rescue_floor_snr=None, rescue_passes=1,
                 shift_radius=2, half_width=8, refit_rounds=0, detector_mode='raw',
                 read_buffer_mb=0, prefetch_depth=2,
-                adaptive_shift_radius=False):
+                adaptive_shift_radius=False,
+                adaptive_shift_boundary_fraction=AdaptiveShiftRadius.BOUNDARY_FRACTION):
     """Process one session into immutable, per-probe time shards.
 
     The existing Kilosort-compatible sorter remains the quality baseline.
@@ -159,6 +160,14 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
             or (adaptive_shift_radius and
                 (backend != 'cuda' or shift_radius >= 8 or refit_rounds))):
         raise ValueError('Adaptive timing radius requires CUDA, radius below 8, and no local refit')
+    if adaptive_shift_radius:
+        try:
+            adaptive_shift_boundary_fraction = float(adaptive_shift_boundary_fraction)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError('Adaptive timing boundary fraction must be in (0, 1]') from exc
+        if (not np.isfinite(adaptive_shift_boundary_fraction)
+                or not 0 < adaptive_shift_boundary_fraction <= 1):
+            raise ValueError('Adaptive timing boundary fraction must be in (0, 1]')
     if rescue_floor_snr is not None and (backend != 'cuda' or
             not np.isfinite(rescue_floor_snr) or not 0 < rescue_floor_snr <= floor_snr):
         raise ValueError('CUDA rescue threshold must be positive and at most primary floor_snr')
@@ -207,7 +216,7 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
             "algorithm": "pilot_fit_boundary_fraction_v1",
             "pilot_seconds": AdaptiveShiftRadius.PILOT_SECONDS,
             "minimum_observations": AdaptiveShiftRadius.MIN_OBSERVATIONS,
-            "boundary_fraction": AdaptiveShiftRadius.BOUNDARY_FRACTION,
+            "boundary_fraction": float(adaptive_shift_boundary_fraction),
             "expanded_radius": shift_radius + 1,
         }
     # Preserve existing default-run checkpoint digests. Nondefault IO settings
@@ -251,7 +260,8 @@ def run_session(manifest, output_root, *, backend="cuda", resume=False,
                 models = _day_models(probe, day_id, journal.root, resume=resume)
                 evidence = TemplateEvidence(models, probe.sample_rate_hz)
                 adaptive_shift = (AdaptiveShiftRadius(
-                    len(models.waveforms), probe.sample_rate_hz, shift_radius)
+                    len(models.waveforms), probe.sample_rate_hz, shift_radius,
+                    boundary_fraction=adaptive_shift_boundary_fraction)
                     if adaptive_shift_radius else None)
                 novel = NoveltyBank(probe.sample_rate_hz) if novelty != 'off' else None
                 if novel is not None and models.waveforms.shape[2] != neighbor_map.shape[1]:

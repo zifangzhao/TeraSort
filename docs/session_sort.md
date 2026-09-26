@@ -300,8 +300,10 @@ terasort session-sort --manifest C:\data\session.json --output-root F:\sorts\ada
 ```
 
 The pilot lasts 30 seconds, requires at least 20 accepted fits per template,
-and expands a template's radius when at least 5% of its pilot fits land on the
-expanded boundary. It currently requires CUDA, a base radius below 8, and
+and expands a template's radius when the configured share of its pilot fits
+land on the expanded boundary. `--adaptive-shift-boundary-fraction` controls
+that share and defaults to `0.05`; 10% was slower and slightly less accurate
+on the available test. The mode requires CUDA, a base radius below 8, and
 `--refit-rounds 0`. The radius vector and pilot statistics are checkpointed
 with each immutable shard for deterministic restart. Keep this experimental
 option off by default: it improved the measured single-recording control, but

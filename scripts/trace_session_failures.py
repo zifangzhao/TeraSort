@@ -36,6 +36,85 @@ def missed_times(gt, predicted, tolerance):
     return missed
 
 
+def channelwise_shift_fit(residual, center, model, contacts, noise_uv, *,
+                          half_width=8, shift_radius=2):
+    """Diagnostic fit allowing each contact a small independent temporal lag.
+
+    The production matcher uses one shared shift. This bounded alternative
+    estimates each contact's lag from the center window, then reports the
+    aggregate normalized score and one-amplitude residual gain. It is used
+    only to test whether cross-contact propagation differences explain misses.
+    """
+    contacts = np.asarray(contacts)
+    valid = contacts >= 0
+    contacts = contacts[valid]
+    template = np.asarray(model[:, valid], np.float64)
+    noise = np.asarray(noise_uv, np.float64)[contacts]
+    weights = 1. / np.maximum(noise, .01) ** 2
+    if (not len(contacts) or center - 30 - shift_radius < 0
+            or center + 30 + shift_radius >= len(residual)):
+        return -1., 0., 0., []
+
+    lo, hi = 30 - half_width, 31 + half_width
+    center_model = template[lo:hi]
+    center_energy_by_contact = np.sum(center_model ** 2, axis=0) * weights
+    lags = np.arange(-shift_radius, shift_radius + 1, dtype=np.int32)
+    signals = np.stack([
+        residual[center + int(lag) - half_width:
+                 center + int(lag) + half_width + 1, contacts].astype(np.float64)
+        for lag in lags
+    ])
+    dots = np.sum(center_model[None, :, :] * signals * weights[None, None, :], axis=1)
+    signal_energies = np.sum(signals ** 2 * weights[None, None, :], axis=1)
+    model_energy = float(np.sum(center_energy_by_contact))
+    slot_ids = np.arange(len(contacts))
+
+    def joint_score(offsets):
+        indices = np.asarray(offsets, np.int32) + shift_radius
+        dot = float(np.sum(dots[indices, slot_ids]))
+        signal_energy = float(np.sum(signal_energies[indices, slot_ids]))
+        return dot / np.sqrt(max(model_energy * signal_energy, 1e-18))
+
+    def best_coordinate(dot_total, energy_total, slot):
+        current = int(best_lags[slot]) + shift_radius
+        dot_without = dot_total - dots[current, slot]
+        energy_without = energy_total - signal_energies[current, slot]
+        scores = (dot_without + dots[:, slot]) / np.sqrt(np.maximum(
+            model_energy * (energy_without + signal_energies[:, slot]), 1e-18))
+        maximum = np.max(scores)
+        winners = np.flatnonzero(scores == maximum)
+        return int(winners[np.argmin(np.abs(lags[winners]))] - shift_radius)
+
+    # Initialize from the exact best shared shift, then use coordinate ascent.
+    # This makes the alternative diagnostic score no worse than the production
+    # shared-shift score under the same center-window objective.
+    best_shared = max(lags, key=lambda lag: joint_score(
+        np.full(len(contacts), lag, np.int32)))
+    best_lags = np.full(len(contacts), best_shared, np.int32)
+    for _ in range(2):
+        lag_indices = best_lags + shift_radius
+        dot_total = float(np.sum(dots[lag_indices, slot_ids]))
+        energy_total = float(np.sum(signal_energies[lag_indices, slot_ids]))
+        for slot in range(len(contacts)):
+            new_lag = best_coordinate(dot_total, energy_total, slot)
+            old_index, new_index = best_lags[slot] + shift_radius, new_lag + shift_radius
+            best_lags[slot] = new_lag
+            dot_total += float(dots[new_index, slot] - dots[old_index, slot])
+            energy_total += float(signal_energies[new_index, slot] -
+                                  signal_energies[old_index, slot])
+
+    full_signals = np.stack([
+        residual[center + int(lag) - 30:center + int(lag) + 31, channel]
+        for channel, lag in zip(contacts, best_lags)
+    ], axis=1).astype(np.float64)
+    full_dot = float(np.sum(template * full_signals * weights[None, :]))
+    full_energy = float(np.sum(template ** 2 * weights[None, :]))
+    score = joint_score(best_lags)
+    amplitude = full_dot / max(full_energy, 1e-18)
+    gain = 2 * amplitude * full_dot - amplitude * amplitude * full_energy
+    return float(score), float(amplitude), float(gain), best_lags.tolist()
+
+
 class FailureTrace:
     def __init__(self, targets, models, core, signal, noise, tolerance, *,
                  detector_voltage=None, detector_noise=None, floor_snr=4.5,
@@ -77,6 +156,7 @@ class FailureTrace:
                         continue
                     options = []
                     raw = []
+                    channelwise = []
                     for shift in range(-2,3):
                         if abs(int(t)+shift-center) > self.tolerance:
                             continue
@@ -86,6 +166,10 @@ class FailureTrace:
                         raw.append((score,amp,gain,shift))
                         if score >= self.score_floor and .3 <= amp <= 3:
                             options.append((gain,score,amp,shift))
+                        local_fit = channelwise_shift_fit(
+                            voltage, int(t)+shift, self.models.waveforms[unit],
+                            self.models.channels[unit], self.noise)
+                        channelwise.append((*local_fit[:3], shift, local_fit[3]))
                     if not raw:
                         continue
                     best_raw = max(raw, key=lambda row:row[0])
@@ -108,6 +192,19 @@ class FailureTrace:
                         gain,score,amp,shift = max(options)
                         record.update(expected_gain=gain, expected_center_score=score,
                                       expected_amplitude=amp, expected_shift=shift)
+                    if channelwise:
+                        channelwise_eligible = [
+                            row for row in channelwise
+                            if row[0] >= self.score_floor and .3 <= row[1] <= 3]
+                        score, amp, gain, shift, lags = max(
+                            channelwise_eligible or channelwise,
+                            key=lambda row: row[2])
+                        record.update(channelwise_score=score,
+                                      channelwise_amplitude=amp,
+                                      channelwise_gain=gain,
+                                      channelwise_shift=shift,
+                                      channelwise_lags=lags,
+                                      channelwise_eligible=bool(channelwise_eligible))
                     target['candidates'].append(record)
                     self.records.setdefault((data['pass_index'],int(t),int(c)), []).append(record)
         else:

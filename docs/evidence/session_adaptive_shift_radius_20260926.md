@@ -64,5 +64,56 @@ unit-recovery gap or satisfy the multi-dataset replacement gate. Do not enable
 it by default until it is replicated across drift, collision, and quiet-unit
 benchmarks, with time-matched Kilosort4 comparisons.
 
+## Later-interval replication
+
+The same matched fixed-radius-2 and adaptive configurations were run on the
+later 510–600 s interval from the same 600-second recording. Adaptive selected
+radius 3 for 200/319 templates after its 30-second pilot.
+
+| Setting, 510–600 s | Units recovered | TP spikes | Precision | Recall | F1 | Splits / merges | Wall seconds |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fixed radius 2 | 174 | 133,013 | 81.820% | 86.423% | 84.059% | 46 / 58 | 84.30 |
+| Adaptive, base 2 | 175 | 133,338 | 81.758% | 86.634% | 84.125% | 44 / 58 | 83.41 |
+
+The later interval adds one recovered unit and 325 true positives; F1 increases
+by 0.066 percentage points while measured runtime falls by 1.1%. Peak total
+VRAM is 1.41 GB for both runs. The direction matches the 420–510 s result,
+though the later-window quality gain is small and each result is a single run.
+This is temporal replication within one recording, not independent-dataset
+validation. The retained Kilosort4 comparison files cover only samples
+16–1,919,960, so they do not provide a Kilosort4 result for this interval.
+
+Two follow-up settings did not improve the speed/quality tradeoff. Adding the
+existing PCA split bank to adaptive radius 2 increased 420–510 s recovery from
+177 to 179 units and F1 from 84.170% to 84.310%, but runtime rose from 82.90 s
+to 83.48 s. Reducing the base radius to 1 with that bank recovered 177 units
+at 84.268% F1 and took 84.37 s. Both remain unselected. A short-window-first
+CUDA fitting-kernel experiment preserved aggregate quality on 420–510 s but
+did not reduce end-to-end time (83.56 s versus 82.90 s) and changed some
+floating-point fit fields, so it was discarded.
+
+Raising the pilot boundary-fraction criterion from 5% to 10% expanded 135
+templates instead of 199 on 420–510 s. It recovered the same 177 units but
+had slightly lower F1 (84.145% versus 84.170%) and took 99.99 s versus 82.90 s;
+the final shard alone took 42.37 s. This single unprofiled run does not isolate
+the cause of the slowdown, but it provides no reason to select the 10%
+setting. Keep 5% as the default. The threshold is exposed as an experimental
+CLI parameter for controlled future tuning.
+
+A diagnostic per-contact timing-offset fit raised the score above 0.75 for
+83 of 231 sampled, credible shape-rejection misses. It also showed high
+scores on many sampled targets whose misses were ultimately caused by a
+different template winning or overlap deferral. Because this is a selected
+miss sample and the alternate fit has not been integrated with residual
+subtraction or evaluated against all negative candidates, it is not yet safe
+to add as an assignment rule.
+
 Outputs are under
 `C:\Frank\Code\PainProject\outputs\smooth3_adaptive_shift_420_510_20260926_01`.
+The later-window control and adaptive outputs are
+`C:\Frank\Code\PainProject\outputs\smooth3_fixed2_510_600_20260926_01` and
+`C:\Frank\Code\PainProject\outputs\smooth3_adaptive_510_600_20260926_01`.
+PCA-bank experiments are in `smooth3_pca_adaptive_420_510_20260926_01` and
+`smooth3_pca_adaptive_r1_420_510_20260926_01` under the same `outputs` folder.
+The rejected 10% criterion run is in
+`C:\Frank\Code\PainProject\outputs\smooth3_adaptive10_420_510_20260926_01`.
