@@ -79,3 +79,34 @@ The prior per-pass-noise comparison is under
 
 These results use one dataset and one held-out interval. The broader quality
 gate and multiday/generalization checks remain open.
+
+## Exact miss replay and targeted experiments
+
+The diagnostic replay in `scripts/trace_session_failures.py` was extended to
+use the run's configured threshold, score floor, overlap policy, and smooth3
+core-MAD candidate frame. On the held-out run it reproduced all 53,605
+assignments exactly. It selected 686 missed ground-truth events for tracing
+(up to four evenly spaced misses per linked unit, not a prevalence-weighted
+sample); 526 had a predicted-unit mapping with IoU >= 0.5.
+
+For those 526 more-credible sampled misses, the furthest observed failure was
+template-shape rejection for 231, overlap deferral for 128, a different
+template winning for 135, ambiguity rejection for 28, amplitude rejection for
+2, and no above-threshold candidate on the mapped contacts for 2. This points
+to residual fitting and template competition as the larger opportunity than
+lowering the detector threshold. The mapping still comes from the evaluation,
+and the selected misses do not estimate whole-recording error prevalence.
+
+Two controlled alternatives were run on the same 30-second interval with the
+same detector and thresholds. Allowing the bounded template updater promoted
+108 templates but recovered 170 units and 43,899 true positives, essentially
+unchanged from frozen templates (170 units, 43,903 true positives). It took
+28.646 s versus the two-run frozen median of 27.631 s. Enabling the existing
+interference scheduler recovered 170 units and 43,922 true positives in
+28.180 s. Its F1 gain over frozen templates was only 0.016 percentage points
+in this single run. Neither alternative is a meaningful quality advance yet.
+
+These experiments do not justify loosening quality controls globally. The
+next quality work should improve drift-aware template representation and
+collision/competitor decisions while retaining the detector's bounded memory
+and exact restart behavior.

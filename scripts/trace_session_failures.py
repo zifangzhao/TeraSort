@@ -37,17 +37,24 @@ def missed_times(gt, predicted, tolerance):
 
 
 class FailureTrace:
-    def __init__(self, targets, models, core, signal, noise, tolerance):
+    def __init__(self, targets, models, core, signal, noise, tolerance, *,
+                 detector_voltage=None, detector_noise=None, floor_snr=4.5,
+                 score_floor=.65, min_margin=.03):
         self.targets, self.models, self.core = targets, models, core
         self.noise, self.tolerance = noise, tolerance
+        self.detector_voltage = signal if detector_voltage is None else detector_voltage
+        self.detector_noise = noise if detector_noise is None else detector_noise
+        self.floor_snr, self.score_floor, self.min_margin = (
+            floor_snr, score_floor, min_margin)
         self.records = {}
         for target in targets:
             unit, sample = target['unit'], target['sample']
             center = sample-core.data_start
             contacts = models.channels[unit]
             valid = contacts >= 0
-            q = np.abs(signal[max(0,center-tolerance):center+tolerance+1,
-                              contacts[valid]]) / noise[contacts[valid]]
+            q = np.abs(self.detector_voltage[
+                max(0,center-tolerance):center+tolerance+1,
+                contacts[valid]]) / self.detector_noise[contacts[valid]]
             target.update(max_local_snr=float(np.max(q)), candidates=[],
                           peak_channel=int(contacts[np.argmax(np.max(q, axis=0))]))
 
@@ -77,7 +84,7 @@ class FailureTrace:
                             self.models.waveforms[unit], self.models.channels[unit],
                             noise_uv=self.noise)
                         raw.append((score,amp,gain,shift))
-                        if score >= .65 and .3 <= amp <= 3:
+                        if score >= self.score_floor and .3 <= amp <= 3:
                             options.append((gain,score,amp,shift))
                     if not raw:
                         continue
@@ -94,8 +101,9 @@ class FailureTrace:
                         score,gain,winner,amp,runner,shift,margin = choice
                         record.update(winner=winner, winner_score=score, winner_gain=gain,
                                       winner_amplitude=amp, margin=margin)
-                        record['decision'] = ('gain_rejected' if gain < 4.5**2 else
-                            'ambiguity_rejected' if margin < .03 else 'proposal')
+                        record['decision'] = (
+                            'gain_rejected' if gain < self.floor_snr**2 else
+                            'ambiguity_rejected' if margin < self.min_margin else 'proposal')
                     if options:
                         gain,score,amp,shift = max(options)
                         record.update(expected_gain=gain, expected_center_score=score,
@@ -140,10 +148,11 @@ class FailureTrace:
                 reason = 'expected_eligible_other_template_wins'
             elif rows:
                 reason = ('expected_template_amplitude_rejected'
-                          if any(r['expected_center_score'] >= .65 for r in rows)
+                          if any(r['expected_center_score'] >= self.score_floor for r in rows)
                           else 'expected_template_shape_rejected')
             else:
-                reason = ('no_candidate_below_threshold_or_masked' if target['max_local_snr'] <= 4.5
+                reason = ('no_candidate_below_threshold_or_masked'
+                          if target['max_local_snr'] <= self.floor_snr
                           else 'no_candidate_in_mapped_patch_time_window')
             target['classification'] = reason
             target['trace_semantics'] = 'furthest_observed_path_across_local_candidates_and_passes'
@@ -161,16 +170,13 @@ def main():
     session = load_session(source / 'manifest.json')
     probe = session.probes[0]
     run = json.loads((source / 'session/run.json').read_text())['config']
-    if (len(session.probes) != 1 or not run['freeze_templates'] or run['residual_passes'] != 3
-            or run['novelty'] != 'off' or run['score_floor'] != .65 or run['min_margin'] != .03
-            or run['floor_snr'] != 4.5):
-        parser.error('Trace currently supports the frozen default three-pass single-probe diagnostic')
+    if (len(session.probes) != 1 or not run['freeze_templates'] or run['novelty'] != 'off'
+            or run['residual_passes'] != 3):
+        parser.error('Trace currently supports frozen-template, three-pass, single-probe runs')
     if run.get('half_width', 8) != 8:
         parser.error('Trace expected-template diagnostic currently requires half_width=8')
     if run.get('refit_rounds', 0):
         parser.error('This trace does not replay the experimental local-refit post-pass')
-    if run.get('detector_mode','raw')!='raw':
-        parser.error('This trace currently assumes raw-noise candidate SNR')
     quality = json.loads((source / 'quality.json').read_text())
     tolerance = quality['tolerance_samples']
     first, stop = run['start_sample'], run['stop_sample']
@@ -222,14 +228,36 @@ def main():
             signal = voltage.copy()
             signal[:, ~qc.usable_channels] = 0
             noise = np.where(qc.usable_channels, qc.noise_uv, np.inf).astype(np.float32)
-            tracer = FailureTrace(targets, models, core, signal, noise, tolerance)
-            events, matches = matcher.match(signal, noise, 4.5,
+            detector_voltage, detector_noise = signal, noise
+            if run.get('detector_mode', 'raw') == 'smooth3':
+                detector_voltage = signal.copy()
+                if len(signal) > 2:
+                    detector_voltage[1:-1] = .25 * (
+                        signal[:-2] + 2 * signal[1:-1] + signal[2:])
+                step = max(1, len(signal) // 4000)
+                sample = detector_voltage[::step]
+                center = np.median(sample, axis=0)
+                estimate = np.median(np.abs(sample-center), axis=0) / .67448975
+                detector_noise = np.where(
+                    np.isfinite(noise), np.maximum(estimate, .01), np.inf
+                ).astype(np.float32)
+            tracer = FailureTrace(
+                targets, models, core, signal, noise, tolerance,
+                detector_voltage=detector_voltage, detector_noise=detector_noise,
+                floor_snr=run['floor_snr'], score_floor=run['score_floor'],
+                min_margin=run['min_margin'])
+            events, matches = matcher.match(signal, noise, run['floor_snr'],
                 core_start=core.core_start-core.data_start, core_stop=core.core_stop-core.data_start,
                 refractory_samples=max(2,round(probe.sample_rate_hz*.0005)), trace=tracer,
+                score_floor=run['score_floor'], min_margin=run['min_margin'],
+                max_passes=run['residual_passes'],
+                max_candidates=run['max_candidates'],
                 overlap_policy=run.get('overlap_policy','strict'),
                 rescue_floor_snr=run.get('rescue_floor_snr'),
                 rescue_passes=run.get('rescue_passes', 1),
-                shift_radius=run.get('shift_radius', 2))
+                shift_radius=run.get('shift_radius', 2),
+                half_width=run.get('half_width', 8),
+                detector_mode=run.get('detector_mode', 'raw'))
             expected = spikes[(spikes['sample_index'] >= core.core_start) &
                               (spikes['sample_index'] < core.core_stop)]
             actual = [(core.data_start+m.source_sample,m.channel,m.unit,m.pass_index) for m in matches]
